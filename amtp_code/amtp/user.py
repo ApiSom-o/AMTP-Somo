@@ -5,7 +5,7 @@ import os
 import time
 
 from .core import boolean
-from .core.crypto import aes_gcm_decrypt, hmac_tag, unwrap, InvalidTag
+from .core.crypto import aes_gcm_decrypt, hmac_tag, unpack_ct, unwrap, InvalidTag
 from .dht import ciphertext_id
 from .core.hashing import H, enc
 from .index import domain_root, gamma, imt_leaf, rho
@@ -23,6 +23,14 @@ CHECKS = [
     ("comp", "Exact Boolean result", "My own Eval(B_Q) gives exactly the returned files: none missing, none extra"),
     ("ct", "Ciphertext integrity", "Every returned file hashes to its cid"),
 ]
+
+
+def _ct_bytes(r) -> bytes:
+    """The raw CT_d bytes of one R_ct entry (hex on the JSON wire)."""
+    try:
+        return bytes.fromhex(r["ct"])
+    except (TypeError, ValueError):
+        raise Reject("ct", f"file {str(r.get('cid'))[:8]} is not a well-formed ciphertext") from None
 
 
 class Reject(Exception):
@@ -227,9 +235,14 @@ class DataUser:
 
     def _check_ciphertexts(self, ctx, resp, results):
         for r in resp["R_ct"]:
-            if ciphertext_id(r["ct"]).hex() != r["cid"]:
+            ct = _ct_bytes(r)
+            if ciphertext_id(ct).hex() != r["cid"]:
                 raise Reject("ct", f"file {r['cid'][:8]} was modified: H(CT) ≠ cid")
-            if r["ct"]["aad"].get("domain") != ctx["domain"]:
+            try:
+                aad = unpack_ct(ct)["aad"]
+            except ValueError:
+                raise Reject("ct", f"file {r['cid'][:8]} is not a well-formed ciphertext") from None
+            if aad.get("domain") != ctx["domain"]:
                 raise Reject("ct", "file belongs to another domain")
         results["ct"] = (True, f"all {len(resp['R_ct'])} hash(es) match")
 
@@ -237,7 +250,7 @@ class DataUser:
     def decrypt(self, resp):
         out = []
         for r in resp["R_ct"]:
-            ct = r["ct"]
+            ct = unpack_ct(_ct_bytes(r))          # already checked by b_ct before decryption
             item = {"cid": r["cid"], "pid": r["pid"], "loc": r["loc"],
                     "policy": ct["aad"]["policy"], "doc": ct["aad"]["doc"]}
             k_d = unwrap(ct["CK"], self.attr_keys)
@@ -245,7 +258,7 @@ class DataUser:
                 item["status"] = "locked"
             else:
                 try:
-                    doc = json.loads(aes_gcm_decrypt(k_d, ct["E"], enc(ct["aad"])))
+                    doc = json.loads(aes_gcm_decrypt(k_d, ct["E"], ct["aad_b"]))
                     item.update(status="open", title=doc["title"], body=doc["body"])
                 except InvalidTag:
                     item["status"] = "decrypt_error"

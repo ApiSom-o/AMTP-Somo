@@ -2,7 +2,7 @@
 import os
 
 from .anchor import transition_message
-from .core.crypto import Signer, aes_gcm_encrypt, keyword_cipher
+from .core.crypto import Signer, keyword_cipher, make_ct
 from .dht import ciphertext_id
 from .core.hashing import H, enc
 from .index import DomainState, PartitionLayout, extract_keywords
@@ -36,15 +36,11 @@ class DataOwner:
         anchor.register_domain(domain, self.signer.public)
 
     def encrypt(self, doc: dict):
-        """Phase 1: CT_d = <E_d, C_Kd, aad_d>,  cid_d = H(CT_d)."""
+        """Phase 1: CT_d = <E_d, C_Kd, aad_d> as raw bytes,  cid_d = H(CT_d)."""
         k_d = os.urandom(32)
         aad = {"domain": self.domain, "doc": doc["id"], "policy": doc["policy"]}
         body = enc({"title": doc["title"], "body": doc["body"]})
-        ct = {
-            "E": aes_gcm_encrypt(k_d, body, enc(aad)),
-            "CK": self.authority.wrap(k_d, doc["policy"]),
-            "aad": aad,
-        }
+        ct = make_ct(k_d, body, self.authority.wrap(k_d, doc["policy"]), aad)   # raw bytes
         # W(d): taken from the shared dataset (documents.csv) when given, so AMTP indexes exactly
         # the keyword sets every baseline uses; otherwise the demo extractor is applied.
         if doc.get("keywords") is not None:

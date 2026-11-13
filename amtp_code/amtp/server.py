@@ -29,6 +29,13 @@ ATTACKS = {
 }
 
 
+def flip_one_byte(ct_hex: str, index: int = -1) -> str:
+    """Tamper with a returned ciphertext: XOR one byte of the raw CT bytes (hex on the wire)."""
+    b = bytearray.fromhex(ct_hex)
+    b[index] ^= 0x01
+    return b.hex()
+
+
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
     """H(i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η) — the message under τ_Q."""
     return H(domain, enc(b_q), epoch, t, bytes.fromhex(nonce_hex))
@@ -131,8 +138,7 @@ class CloudServer:
         resp = build_response(state, b_q, nonce, self.dht)
         rct = resp["R_ct"]
         if mode == "tamper_ct" and rct:
-            c = rct[0]["ct"]["E"]["C"]
-            rct[0]["ct"]["E"]["C"] = c[:-2] + ("00" if c[-2:] != "00" else "01")
+            rct[0]["ct"] = flip_one_byte(rct[0]["ct"])
             attack.update(applied=True, what=f"changed one byte of file {rct[0]['cid'][:8]}")
         elif mode == "drop_result" and rct:
             gone = rct.pop()
@@ -143,7 +149,7 @@ class CloudServer:
             if extra is not None:
                 pid, slot = state.loc[extra]
                 rct.append({"cid": extra.hex(), "pid": pid, "loc": slot,
-                            "ct": self.dht.get(extra)})
+                            "ct": self.dht.get(extra).hex()})
                 attack.update(applied=True, what=f"added non-matching file {extra.hex()[:8]}")
         elif mode == "forge_partition" and resp["proof"]["partitions"]:
             desc = resp["proof"]["partitions"][0]
@@ -232,8 +238,8 @@ def build_response(state, b_q, nonce, dht, hide=None, fake_absent=None, offline=
 
     r_ct = []
     for cid, pid, slot in sorted(m_q, key=lambda x: (x[1], x[2])):
-        ct = dht.get(bytes.fromhex(cid), offline=offline)   # may raise StorageError
-        r_ct.append({"cid": cid, "pid": pid, "loc": slot, "ct": ct})
+        ct = dht.get(bytes.fromhex(cid), offline=offline)   # raw CT bytes; may raise StorageError
+        r_ct.append({"cid": cid, "pid": pid, "loc": slot, "ct": ct.hex()})   # hex on the JSON wire
 
     return {
         "domain": state.domain, "epoch": state.epoch, "B_Q": b_q, "nonce": nonce,

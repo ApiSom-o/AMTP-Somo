@@ -54,12 +54,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from amtp.core import boolean                                    # noqa: E402
 from amtp.anchor import RootAnchor, transition_message           # noqa: E402
-from amtp.core.crypto import AttributeAuthority, Signer, aes_gcm_encrypt   # noqa: E402
+from amtp.core.crypto import AttributeAuthority, Signer, make_ct          # noqa: E402
 from amtp.dht import ciphertext_id                               # noqa: E402
 from amtp.engine import Engine                                   # noqa: E402
 from amtp.core.hashing import HashCounter, enc                   # noqa: E402
 from amtp.owner import DomainKeys, keyword_key                   # noqa: E402
-from amtp.server import CloudServer, build_response              # noqa: E402
+from amtp.server import CloudServer, build_response, flip_one_byte   # noqa: E402
 from amtp.user import DataUser, Reject                           # noqa: E402
 from amtp.variants import AdaptivePolicy, StaticPolicy           # noqa: E402
 from bench.workload import REPO_ROOT, _primary_categories, arxiv_loader   # noqa: E402
@@ -105,8 +105,7 @@ class Corpus:
             aad = {"domain": domain, "doc": doc.doc_id, "policy": POLICY}
             body = enc({"title": doc.doc_id,
                         "body": self.D.read_bytes(doc, self.data).decode("utf-8", "replace")})
-            ct = {"E": aes_gcm_encrypt(k_d, body, enc(aad)),
-                  "CK": self.authority.wrap(k_d, POLICY), "aad": aad}
+            ct = make_ct(k_d, body, self.authority.wrap(k_d, POLICY), aad)    # raw CT bytes
             bucket = self.bucket_of[self.cat.get(doc.doc_id, doc.domain)]
             self._docs[key] = (ciphertext_id(ct), ct, frozenset(self.h(w, domain) for w in doc.keywords), bucket)
         return self._docs[key]
@@ -117,7 +116,7 @@ class Corpus:
         aad = {"domain": domain, "doc": doc.doc_id, "policy": POLICY}
         body = enc({"title": doc.doc_id,
                     "body": (self.D.read_bytes(doc, self.data) + suffix).decode("utf-8", "replace")})
-        return {"E": aes_gcm_encrypt(k_d, body, enc(aad)), "CK": self.authority.wrap(k_d, POLICY), "aad": aad}
+        return make_ct(k_d, body, self.authority.wrap(k_d, POLICY), aad)
 
     def user(self, domains):
         return DataUser("du", "du", "", [POLICY], self.authority.user_keys([POLICY]),
@@ -274,15 +273,14 @@ def run_xquery(doms, states, user, text):
 
 def tamper_response(resp, kind, targets, extra=None):
     """The server's cheat on t files, the same changes as the CloudServer modes (amtp/server.py), with the honest proof:
-      modify      change one byte of the ciphertext of the returned files in `targets` (tamper_ct)
+      modify      flip one byte of the raw CT bytes of the returned files in `targets` (tamper_ct)
       hide        leave the files in `targets` out of R_ct (drop_result)
       inject      add the R_ct entries in `extra` (files that do not match the query; extra_result)
       old_version replace the ciphertext of the files in `targets` by extra[cid], an older version of the file"""
     if kind == "modify":
         for r in resp["R_ct"]:
             if r["cid"] in targets:
-                c = r["ct"]["E"]["C"]
-                r["ct"]["E"]["C"] = c[:-2] + ("00" if c[-2:] != "00" else "01")
+                r["ct"] = flip_one_byte(r["ct"])
     elif kind == "hide":
         resp["R_ct"] = [r for r in resp["R_ct"] if r["cid"] not in targets]
     elif kind == "inject":
@@ -290,7 +288,7 @@ def tamper_response(resp, kind, targets, extra=None):
     elif kind == "old_version":
         for r in resp["R_ct"]:
             if r["cid"] in targets:
-                r["ct"] = extra[r["cid"]]
+                r["ct"] = extra[r["cid"]].hex()
     else:
         raise ValueError(kind)
 
@@ -307,7 +305,7 @@ def full_check(user, ctx, resp):
         return -1
     m_hat = boolean.evaluate(boolean.from_json(ctx["B_Q"]), m_h)
     proj = {(r["cid"], r["pid"], r["loc"]) for r in resp["R_ct"]}
-    modified = sum(ciphertext_id(r["ct"]).hex() != r["cid"] for r in resp["R_ct"])
+    modified = sum(ciphertext_id(bytes.fromhex(r["ct"])).hex() != r["cid"] for r in resp["R_ct"])
     return len(m_hat - proj) + len(proj - m_hat) + modified
 
 
@@ -675,7 +673,7 @@ def suite_tamper(a):
                     for i in inj[:t]:
                         cid = bytes.fromhex(cid_of[i])
                         pid, slot = state.loc[cid]
-                        extra.append({"cid": cid_of[i], "pid": pid, "loc": slot, "ct": dom.server.dht.get(cid)})
+                        extra.append({"cid": cid_of[i], "pid": pid, "loc": slot, "ct": dom.server.dht.get(cid).hex()})
                 else:
                     targets = {cid_of[i] for i in ts["tamper_order"][:t]}
                     extra = ({cid_of[i]: corpus.encrypt_version(by_id[i], dname, corpus.D.OLD_VERSION_SUFFIX)
