@@ -82,7 +82,7 @@ class DataUser:
         except Reject as r:
             results[r.check] = (False, r.detail)
             failed = r.check
-        except (KeyError, ValueError, TypeError, IndexError) as err:
+        except (KeyError, ValueError, TypeError, IndexError, OverflowError, AttributeError) as err:
             # Malformed response: reject at the first check not yet passed
             failed = next(k for k, *_ in CHECKS if k not in results)
             results[failed] = (False, f"malformed evidence ({type(err).__name__})")
@@ -120,6 +120,9 @@ class DataUser:
         m_h, absent = {}, 0
         for e in ev:
             h = e["h"]
+            if e["status"] not in ("present", "absent"):
+                raise Reject("idx", f"unknown evidence status {str(e['status'])[:16]!r}: "
+                                    "every keyword must be proven present or absent")
             if e["status"] == "absent":
                 lo = e["lo"]
                 lo_h, lo_next = bytes.fromhex(lo["h"]), bytes.fromhex(lo["next"])
@@ -163,7 +166,7 @@ class DataUser:
         r_idx = bytes.fromhex(resp["R_idx"])
         n_ok = 0
         for e in resp["proof"]["evidence"]:
-            if e["status"] != "present":
+            if e["status"] == "absent":          # already proven by the non-membership check
                 continue
             gammas = []
             for pid, comp in e["L"]:
