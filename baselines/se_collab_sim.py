@@ -47,6 +47,12 @@ Simulation ของ baseline SE-COLLAB [37]
      PRE transform เกิดครั้งเดียวต่อ query (Table 4: TrapGen = 3E + Pe) ส่วน C2 พก token I(w) ของทุก owner
      (ต่อจากข้อ 3) แล้ว proxy ค้น index + สร้าง Merkle proof ต่อ owner และเซ็นผลรวมครั้งเดียว
      (Phase 6 Step 3: Verify(pi, T'q, R)); DU ตรวจ Merkle root ต่อ owner
+ 13. [FIX] proxy ไม่ตรวจ bind ด้วย pairing (paper Phase 4 Step 2 ตรวจแค่ signature + ZKP; Table 4 มี P_e
+     เฉพาะใน TrapGen) -> pairing เกิดครั้งเดียวต่อ query ฝั่ง DU ตาม TrapGen = 3E + P_e
+ 14. ค่าเริ่มต้นของ --proof-mode = paths (Merkle path ทีละไฟล์ ชี้ไฟล์ที่ถูกแก้ได้ ตาม Phase 6);
+     multi (multiproof) เป็นการ optimize ที่ไม่อยู่ใน paper ใช้เมื่อสั่งเท่านั้น
+ 15. ต้นทุน verify ที่ implement = Merkle + Schnorr (2E) ส่วน Table 4 ของ paper เขียน E + P_e + f_ct H
+     แต่ไม่ได้อธิบาย "ZKP over (T'q, R)" -> ไม่เติม pairing ที่ไม่มีหน้าที่; verify ของเราจึงเป็น lower bound
 หมายเหตุ: paper ไม่ได้ใช้ index Merkle root ตอนตรวจผล -> ผลลัพธ์ที่ถูกตัดทิ้งจะตรวจไม่เจอ
 (เป็นพฤติกรรมของ paper ไม่ใช่บั๊กของการจำลอง; selftest ข้อ t_omission_not_detected)
 
@@ -980,9 +986,8 @@ class CloudProxy:
                 delta = grp.hash(grp.serialize(V1) + grp.serialize(V2) + d + hq_claim, ZR)
                 if g ** z * tq.C1 ** delta != V1 or PK ** z * tq.C3 ** delta != V2:
                     raise PermissionError("bad NIZK")
-        with T("verify_binding"):                        # ตรวจว่า trapdoor ผูกกับ AA ที่ถูกต้อง
-            if H(grp.serialize(pair(tq.C3, self.aa_pk[tq.aa_id]["h"])), tag=b"BIND") != tq.bind:
-                raise PermissionError("trapdoor not bound to authority")
+        # [FIX] ข้อ 13: paper (Phase 4 Step 2) ให้ proxy ตรวจแค่ signature + ZKP ไม่มี pairing ฝั่ง proxy
+        #   (Table 4 มี P_e เฉพาะใน TrapGen) จึงไม่ตรวจ bind ด้วย pairing ซ้ำ; bind ยังถูกเซ็นอยู่ใน digest ของ Tq
         with T("transform"):                             # Algorithm 1: Trapdoor Transformation (PRE) [ASSUMPTION] ข้อ 5
             Z = tq.C1 ** self.x                          # Z = C1^{x_cloud} = PK_cloud^r (DH)
             payload = aes_decrypt(H(grp.serialize(Z), tag=b"KDF"), tq.C2)
@@ -1067,7 +1072,7 @@ class CloudProxy:
 
     def search_multi(self, tq: Trapdoor, proof_mode: str = "paths",
                      check_proofs: bool = True) -> Tuple["MultiResponse", Dict[str, float]]:
-        """cross-domain search ด้วย trapdoor ก้อนเดียว: ตรวจ signature / NIZK / binding และ transform (PRE) ครั้งเดียว
+        """cross-domain search ด้วย trapdoor ก้อนเดียว: ตรวจ signature / NIZK และ transform (PRE) ครั้งเดียว
         แล้วค้น index ของแต่ละ owner (Algorithm 2) + Merkle proof ต่อ owner และเซ็นผลรวมครั้งเดียว
         [ASSUMPTION] ข้อ 12 (Phase 4 Step 1: DU รวมคีย์จากหลาย AA เป็น trapdoor เดียว; Tq ไม่มีส่วนที่ขึ้นกับ DO)"""
         T = Timer()
@@ -1329,7 +1334,7 @@ def run_query(s, ds, du, q, proof_mode="paths"):
         "end_to_end": (t3 - t0) * 1e3,            # รวมทุกขั้น (ไม่รวม network)
         "trapdoor": tq_t["trapdoor"],             # เฉพาะ Tq (3 exp + 1 pairing) = Fig. 3 ของ paper
         "admission": sum(srv.get(k, 0) for k in
-                         ("revocation_check", "verify_signature", "verify_zkp", "verify_binding")),
+                         ("revocation_check", "verify_signature", "verify_zkp")),
         "transform": srv["transform"],            # Algorithm 1
         "search_core": srv["search_core"],        # ค้นหาล้วน (Algorithm 2) = Fig. 4/5
         "proof_gen": srv["proof_gen"],
@@ -1696,7 +1701,7 @@ def run_xquery(s, dss, du, q, proof_mode):
     times = {
         "query_gen": (t1 - t0) * 1e3, "server_total": (t2 - t1) * 1e3, "verify_total": (t3 - t2) * 1e3,
         "end_to_end": (t3 - t0) * 1e3, "trapdoor": tq_t["trapdoor"],
-        "admission": sum(srv.get(k, 0) for k in ("revocation_check", "verify_signature", "verify_zkp", "verify_binding")),
+        "admission": sum(srv.get(k, 0) for k in ("revocation_check", "verify_signature", "verify_zkp")),
         "transform": srv["transform"], "search_core": srv["search_core"], "proof_gen": srv["proof_gen"],
         "merkle_verify": ver.get("merkle_verify", 0.0), "result_proof_verify": ver.get("result_proof_verify", 0.0),
     }
@@ -2055,8 +2060,9 @@ def main():
     ap.add_argument("--d-counts", type=int, nargs="+", default=Dm.D_COUNTS, help="xdomains: จำนวน domain")
     ap.add_argument("--max-queries", type=int, default=0, help="xdomains: ใช้ query n ตัวแรก (0 = ทั้งหมด)")
     ap.add_argument("--tamper-kinds", nargs="+", default=Dm.TAMPER_KINDS, choices=Dm.TAMPER_KINDS)
-    ap.add_argument("--proof-mode", choices=["paths", "multi"], default="multi",
-                    help="v4 suites: แบบ proof (multi = แบบที่เร็วกว่าใน Exp. 2)")
+    ap.add_argument("--proof-mode", choices=["paths", "multi"], default="paths",
+                    help="v4 suites: แบบ proof (paths = Merkle path ทีละไฟล์ตาม Phase 6 ของ paper; "
+                         "multi = multiproof ที่เราเพิ่มเอง ไม่อยู่ใน paper)")
     a = ap.parse_args()                           # อ่าน argument
     run = {"demo": run_demo, "selftest": run_selftest, "paper": suite_paper, "exp1": suite_exp1,
            "exp2": suite_exp2, "exp5": suite_exp5, "revocation": suite_revocation, "search1": suite_search1,

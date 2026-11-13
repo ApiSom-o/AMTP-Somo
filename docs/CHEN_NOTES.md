@@ -6,7 +6,7 @@ Forward and Backward Privacy Feasible for Cloud Storage" (VM-DSSE-FB), IEEE TIFS
 
 **สรุป:** โค้ดทำตาม paper ครบทั้ง Algorithm 1–5 (Setup, Share, Update, Search, Verify) comment ในโค้ดอ้าง
 เลขบรรทัดของ algorithm ไว้ (`[Alg.4 L20]`) จุดที่ paper เขียนผิดหรือไม่ได้ระบุติดป้าย `[FIX]` / `[ASSUMPTION]`
-ไว้ในหัวไฟล์ (ข้อ 1–9) `selftest` ผ่าน 12/12 รวมกรณี CS ซ่อนผลลัพธ์, ข้าม entry เก่า และปลอม proof
+ไว้ในหัวไฟล์ (ข้อ 1–9) `selftest` ผ่าน 13/13 รวมกรณี CS ซ่อนผลลัพธ์, ข้าม entry เก่า และปลอม proof
 
 ## 1. ส่วนที่ตรงกับ paper
 
@@ -27,7 +27,7 @@ Forward and Backward Privacy Feasible for Cloud Storage" (VM-DSSE-FB), IEEE TIFS
 |---|---|---|
 | `K_u` (Alg. 2 L2) | สุ่มใหม่ทุกครั้งที่ Share → ข้อมูลที่แชร์ไปก่อนหน้าค้นไม่เจอ | `[FIX]` สุ่มเฉพาะครั้งแรกของผู้ใช้ |
 | CntDiffs (Alg. 2 L12) | เก็บแค่ `Enc(w, c)` แต่ Alg. 4 L4 ต้องใช้ `ST_c` | `[FIX]` เข้ารหัส `(w, c, ST_c)` |
-| Alg. 5 | `return accept` หลังเช็ค keyword แรก | `[FIX]` เช็คครบทุก keyword ก่อน accept |
+| Alg. 5 | `return accept` หลังเช็ค keyword แรก | `[FIX]` เช็คครบทุก keyword ก่อน accept และ reject ถ้า CS ส่ง `(Sum_e, proof)` มาไม่ครบทุก keyword ใน q (เดิม `zip` ตัดส่วนเกินทิ้งเงียบ ๆ ทำให้ CS ตัดผลของ keyword หนึ่งทิ้งแล้วยังผ่าน; selftest `t_reject_dropped_keyword`) |
 | ความยาว bitmap γ (Sec. II-A) | เขียน `γ = ⌈log₂ N_max⌉` ซึ่งเก็บ N ไฟล์ไม่ได้ (bitmap ต้องมี 1 บิตต่อไฟล์) | `[ASSUMPTION]` γ = N (+ ที่เผื่อเอกสารใหม่ใน Exp. 3) |
 | คีย์ของ F1 | ไม่ระบุ | ใช้ `K'_u` (DU คำนวณ proof ได้ CS ปลอมไม่ได้) |
 | Primitive | ไม่ระบุ | HMAC-SHA256/512 (PRF), SHA-256 (H1, H2), SHAKE-256 (H3 ยาว γ บิต), AES-256-GCM, λ = 128 |

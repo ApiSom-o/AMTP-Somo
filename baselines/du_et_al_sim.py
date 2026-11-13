@@ -23,7 +23,15 @@ Simulation ของ baseline Du et al. [7]
   3. Algorithm 4 เพิ่ม server เข้า L เมื่อ HM' == HM และ return V -> แก้เป็น "ไม่เท่ากัน" และ return L
   4. ความยาว HMAC (32 byte) ไม่เท่ากับ ID (HMAC||fid) -> ขยาย R ให้ยาวเท่า ID ก่อน XOR
   5. h(u.e, x) ใน remapping ใช้ AES เป็น PRF (เร็วพอสำหรับ build tree ขนาดใหญ่)
-  6. ใช้ Bloom filter tree แบบ basic (ทุก node ยาว d เท่ากัน, Fig.3(a))
+  6. [ASSUMPTION] ใช้ Bloom filter tree แบบ optimized ของ paper (Section IV-B-5, Fig.3(b)):
+     - d = ความยาวที่ root ต้องใช้ = r(1+c)n'_root/(-ln(1-p^(1/r))) โดย n'_root = keyword ไม่ซ้ำทั้งหมด
+       trapdoor และ BF_org ทุก node อยู่ใน space ขนาด d นี้ (BF_org เก็บเป็นรายการตำแหน่งที่เป็น 1
+       เพราะ bit array ยาว d ต่อ leaf ใช้ RAM ไม่ไหว; u.E และ M = C||BF_i ใน Algorithm 3 ใช้รายการนี้)
+     - แต่ละ node ถูก remap (IV-B-4) ลงใน BF ยาว d_u = (จำนวนตำแหน่งที่เป็น 1)/(-ln(1-p^(1/r)))
+       = r(1+c)n'_u/(-ln(1-p^(1/r))) ของ node นั้นเอง ทุก node จึงมี false positive ~ p และตัดกิ่งได้
+     - paper เขียนสูตรเป็น -r c n'/ln(1-p^(1/r)) (คูณ c ตรง ๆ จะทำให้ filter สั้นลง ไม่น่าใช่) -> ใช้ r(1+c)n'
+     - ก่อนหน้านี้โค้ดใช้ basic tree ที่ทุก node ยาวเท่า leaf (คำนวณจาก z_max) ซึ่งไม่ตรงทั้ง Fig.3(a)
+       (basic tree ต้องยาวเท่า root) และ Fig.3(b): node ระดับบนเต็มไปด้วย 1 จึงตัดกิ่งไม่ได้
   7. Du เป็นระบบ multi-cloud ไม่มีแนวคิด domain -> เอกสาร N ไฟล์ของทุก domain รวมเป็นชุดเดียว
      แล้วกระจาย slice ไป n_c cloud (domain ใช้แค่บันทึกว่า query มาจาก domain ไหน)
   8. fid = ลำดับของเอกสารในชุดที่ sample มา (0..N-1) แทน doc_id แบบ string ของ dataset
@@ -302,10 +310,11 @@ def to_du(src, data_dir, extra=None):
 # 5) Bloom filter tree (Section IV-B-3, Algorithm 1, Eq.(3))
 # ============================================================================
 class Node:                                       # T_node = <fid, BF, pl, pr> (+ e, E จาก remapping)
-    __slots__ = ("bf", "fid", "pl", "pr", "e", "E", "slot", "_enc")  # ประหยัด memory
+    __slots__ = ("bf", "d", "fid", "pl", "pr", "e", "E", "slot", "_enc")  # ประหยัด memory
 
     def __init__(self, bf, fid=None, pl=None, pr=None):  # constructor
         self.bf = bf                              # Bloom filter ของ node
+        self.d = 0                                # ความยาว BF ของ node นี้ (optimized tree: แต่ละ node ยาวไม่เท่ากัน)
         self.fid = fid                            # file ID (leaf เท่านั้น; nonleaf = None)
         self.pl, self.pr = pl, pr                 # ลูกซ้าย / ลูกขวา
         self.e = None                             # ค่าสุ่ม u.e สำหรับ remapping
@@ -317,16 +326,12 @@ class Node:                                       # T_node = <fid, BF, pl, pr> (
         return self.pl is None and self.pr is None
 
 
-def bf_tree_build(bfs, fids):                     # Algorithm 1: BFTreeBuild (top-down)
-    if len(bfs) == 1:                             # บรรทัด 2: เหลือ BF เดียว -> leaf
-        leaf = Node(bfs[0], fid=fids[0])          # บรรทัด 3-4: T.BF = BF[0], T.fid = fid[0]
-        leaf.slot = fids[0]                       # จำว่าเป็นไฟล์ไหน
-        return leaf                               # คืน leaf
-    half = (len(bfs) + 1) // 2                    # บรรทัด 10: แบ่งให้ |BF_l| - |BF_r| <= 1
-    left = bf_tree_build(bfs[:half], fids[:half]) # บรรทัด 12: สร้างลูกซ้าย
-    right = bf_tree_build(bfs[half:], fids[half:])  # บรรทัด 13: สร้างลูกขวา
-    # บรรทัด 6-9: T.BF = OR ของทุก BF ในกลุ่ม; ผลเท่ากับ OR ของลูกสองตัว จึงคำนวณจากลูกเพื่อลดเวลา
-    return Node(left.bf | right.bf, pl=left, pr=right)  # node ภายใน (fid = null)
+def node_bf_length(n_set_bits: int, r: int, fp: float) -> int:
+    """Section IV-B-5 (optimized tree, Fig. 3(b)): ความยาว BF ของ node = r*n'/(-ln(1 - p^(1/r)))
+    n' = จำนวน element ของ node (keyword ใน subtree + random insertion c|W|) และ r*n' = จำนวนตำแหน่ง
+    ที่ถูกตั้งเป็น 1 ใน BF_org ของ node (ใน space ขนาด d ที่ใหญ่พอสำหรับ root ตำแหน่งแทบไม่ชนกัน)
+    -> ความยาว = n_set_bits / (-ln(1 - p^(1/r)))  [ASSUMPTION] ข้อ 6"""
+    return max(8, math.ceil(n_set_bits / -math.log(1 - fp ** (1 / r))))
 
 
 # ============================================================================
@@ -341,19 +346,20 @@ class CloudServer:
         self.leaves = []                          # leaf ทั้งหมด (ใช้จำลองการโกง 'irrelevant')
         self.behavior = behavior                  # honest / empty / drop / tamper / forge / irrelevant
 
-    def _h(self, enc, x: int) -> int:             # h(T.e, x) % d แบบ scalar ระหว่างค้นหา
+    def _h(self, enc, x: int, d: int) -> int:     # h(T.e, x) % d_u แบบ scalar ระหว่างค้นหา
         blk = int(x).to_bytes(8, "little") + b"\x00" * 8  # block เดียวกับ prf_positions
         v = int.from_bytes(enc.update(blk)[:8], "little")  # AES_{e}(x) 8 byte แรก
         COUNT.hash += 1                           # นับเป็น T_H
-        return v % self.d                         # ตำแหน่งใน BF ที่ remap แล้ว
+        return v % d                              # ตำแหน่งใน BF ของ node นี้ (ยาว d_u)
 
     def _match(self, node: Node, Q) -> bool:      # เงื่อนไข match: T.BF[h(T.e,x)] = 1 ทุก x ใน Q
         bits = node.bf                            # BF แบบ packed bytes
         enc = node._enc                           # AES key schedule ของ T.e
         if enc is None:                           # ครั้งแรกที่เข้า node นี้ (รอบ warm-up สร้างไว้ให้)
             enc = node._enc = Cipher(algorithms.AES(node.e), modes.ECB()).encryptor()  # cache ไว้ใน node
+        d = node.d                                # ความยาว BF ของ node นี้
         for x in Q:                               # ทุกตำแหน่งใน trapdoor
-            p = self._h(enc, x)                   # remap ตำแหน่ง
+            p = self._h(enc, x, d)                # remap ตำแหน่ง
             if not (bits[p >> 3] >> (7 - (p & 7))) & 1:  # อ่าน bit ที่ p (ลำดับ big-endian ของ packbits)
                 return False                      # มี bit เป็น 0 -> ไม่ match (หยุดทันที)
         return True                               # ทุก bit เป็น 1 -> match
@@ -425,10 +431,12 @@ class DuScheme:
         self.kf = os.urandom(32)                  # secret key k_f (แชร์กับ data user)
         self.master_keys = [os.urandom(32) for _ in range(self.r)]  # master keys v_1..v_r
         self.V = gen_secret_vector(self.t, self.m, self.rng)  # secret vector V
-        z_max = max(len(dc.keywords) for dc in docs)  # จำนวน keyword มากสุดต่อไฟล์
-        # [ASSUMPTION] ความยาว d ตามสูตร Section IV-B-5: d = r*n'/(-ln(1 - p^(1/r)))
-        #   โดย n' = (1+c)*z_max (นับ random insertion เป็น keyword เพิ่ม c|W| ตัว)
-        self.d = math.ceil(self.r * (1 + self.c) * z_max / -math.log(1 - self.fp ** (1 / self.r)))
+        n_root = len(set().union(*(dc.keywords for dc in docs)))  # keyword ไม่ซ้ำทั้งหมด = element ของ root
+        # [ASSUMPTION] ข้อ 6: d = ความยาว BF ที่ root ต้องใช้ ตามสูตร Section IV-B-5 d = r*n'/(-ln(1 - p^(1/r)))
+        #   โดย n' = (1+c)*n_root (นับ random insertion เป็น keyword เพิ่ม c|W| ตัว)
+        #   trapdoor และ BF_org ใช้ space ขนาด d นี้; แต่ละ node ถูก remap ลงใน BF ยาว d_u ของตัวเอง
+        self.d = math.ceil(self.r * (1 + self.c) * n_root / -math.log(1 - self.fp ** (1 / self.r)))
+        self.pos_dtype = ">u4" if self.d < 2 ** 32 else ">u8"  # BF_org เก็บเป็นรายการตำแหน่ง (big-endian)
         self.orig_len = {}                        # ความยาวไฟล์จริง (ใช้ตัด padding ตอนกู้)
         behaviors = behaviors or ["honest"] * self.n  # พฤติกรรมของแต่ละ cloud
         self.clouds = [CloudServer(j, self.d, behaviors[j]) for j in range(self.n)]  # สร้าง n cloud
@@ -446,27 +454,44 @@ class DuScheme:
                 self.clouds[j].slices[dc.fid] = all_slices[dc.fid][j]
 
         # ---- (B) Bloom filter generation (Section IV-B-2) + random insertion
-        bfs = []                                  # BF_i ของทุกไฟล์
+        # BF_i ใน space ขนาด d (ใหญ่พอสำหรับ root) เก็บเป็นรายการตำแหน่งที่เป็น 1 (เรียงแล้ว) แทน bit array
+        # [ASSUMPTION] ข้อ 6: bit array ยาว d ต่อ leaf ใช้ RAM ไม่ไหว; รายการตำแหน่งแทน BF เดียวกันทุกประการ
+        leaf_pos = []                             # BF_i ของทุกไฟล์ (ตำแหน่งที่เป็น 1)
         for dc in docs:                           # ทุกไฟล์
-            bf = np.zeros(self.d, dtype=bool)     # bit array d bit เริ่มเป็น 0
-            for w in dc.keywords:                 # ทุก keyword ของไฟล์
-                for v in self.master_keys:        # r master keys
-                    bf[bf_hash(w, v, self.d)] = True  # set bit h(w, v_i) % d
+            pos = [bf_hash(w, v, self.d) for w in dc.keywords for v in self.master_keys]  # h(w, v_i) % d
             n_rand = int(self.c * len(dc.keywords) * self.r)  # c * |W_i| * r
-            bf[self.np_rng.integers(0, self.d, n_rand)] = True  # random insertion (blinding)
-            bfs.append(bf)                        # เก็บ BF_i
-        self.bf_org_bytes = {dc.fid: np.packbits(bf).tobytes() for dc, bf in zip(docs, bfs)}  # BF_i แบบ bytes
+            pos.extend(self.np_rng.integers(0, self.d, n_rand).tolist())  # random insertion (blinding)
+            leaf_pos.append(np.unique(np.asarray(pos, dtype=np.int64)))  # เรียง + ตัดซ้ำ
+        fids = [dc.fid for dc in docs]            # file ID ตามลำดับ
 
-        # ---- (C) Bloom filter tree (Algorithm 1)
-        base = bf_tree_build(bfs, [dc.fid for dc in docs])  # tree BT ต้นฉบับ
-
-        # ---- (D) remapping + encoded ID (Algorithm 3) แยกต่อ cloud
-        for cl in self.clouds:                    # สำหรับแต่ละ cloud j
-            kfj = self.kf + cl.j.to_bytes(4, "big")  # คีย์ k_f || j
-            cl.root = self._remap(base, cl, kfj)  # สร้าง tree ที่ remap แล้วเฉพาะ cloud นี้
-        del base, bfs                             # tree ต้นฉบับไม่ใช้แล้ว (เจ้าของข้อมูลไม่ต้องเก็บ) คืน RAM
+        # ---- (C)+(D) Bloom filter tree แบบ optimized (Algorithm 1 + Section IV-B-5, Fig. 3(b))
+        #   พร้อม remapping (IV-B-4) และ encoded ID (Algorithm 3) แยกต่อ cloud ในรอบเดียว
+        kfjs = [self.kf + cl.j.to_bytes(4, "big") for cl in self.clouds]  # คีย์ k_f || j ของแต่ละ cloud
+        _, roots = self._build(leaf_pos, fids, 0, len(docs), kfjs)
+        for cl, root in zip(self.clouds, roots):  # root ของ tree ที่ remap แล้วของแต่ละ cloud
+            cl.root = root
+        del leaf_pos                              # BF_org ต้นฉบับไม่ใช้แล้ว (เจ้าของข้อมูลไม่ต้องเก็บ) คืน RAM
         gc.collect()                              # เก็บกวาดทันที
         COUNT.reset()                             # setup เป็น offline ไม่นับรวมกับ phase ที่วัด
+
+    def _build(self, leaf_pos, fids, lo, hi, kfjs):
+        """Algorithm 1 (BFTreeBuild, top-down split) กับ optimized tree ของ Section IV-B-5:
+        BF_org ของ node = OR ของ BF_i ใน subtree (ใน space ขนาด d = union ของตำแหน่ง)
+        แต่ละ node ถูก remap (IV-B-4) ลงใน BF ยาว d_u ที่คำนวณจาก element ของ node นั้นเอง
+        คืน (ตำแหน่งที่เป็น 1 ของ BF_org, [node ที่ remap แล้วของแต่ละ cloud])"""
+        if hi - lo == 1:                          # บรรทัด 2-4: เหลือ BF เดียว -> leaf
+            pos = leaf_pos[lo]                    # BF_i ของไฟล์นี้
+            return pos, [self._remap(pos, cl, kfj, fid=fids[lo]) for cl, kfj in zip(self.clouds, kfjs)]
+        half = lo + (hi - lo + 1) // 2            # บรรทัด 10: แบ่งให้ |BF_l| - |BF_r| <= 1
+        lpos, lnodes = self._build(leaf_pos, fids, lo, half, kfjs)  # บรรทัด 12: ลูกซ้าย
+        rpos, rnodes = self._build(leaf_pos, fids, half, hi, kfjs)  # บรรทัด 13: ลูกขวา
+        pos = np.union1d(lpos, rpos)              # บรรทัด 6-9: T.BF = OR ของทุก BF ในกลุ่ม
+        nodes = []
+        for cl, kfj, ln, rn in zip(self.clouds, kfjs, lnodes, rnodes):
+            node = self._remap(pos, cl, kfj)      # remap node ภายในลง BF ยาว d_u
+            node.pl, node.pr = ln, rn             # ผูกลูก
+            nodes.append(node)
+        return pos, nodes
 
     def _encode_id(self, fid: int, Cij: bytes, bf_bytes: bytes, kfj: bytes) -> bytes:
         """Algorithm 3: ID'_{i,j} = (HMAC(kf||j, fid) || fid) XOR R_{i,j}"""
@@ -480,26 +505,23 @@ class DuScheme:
     def _expand(r32: bytes, n: int) -> bytes:     # [ASSUMPTION] ขยาย R (32 byte) ให้ยาว n byte
         return (r32 + H(r32))[:n]                 # paper ไม่ระบุ; ใช้ R || H(R) แล้วตัด
 
-    def _remap(self, node: Node, cl: CloudServer, kfj: bytes) -> Node:
-        """Section IV-B-4: สร้างสำเนา node ที่ remap แล้ว พร้อม u.e, u.E"""
+    def _remap(self, xs: np.ndarray, cl: CloudServer, kfj: bytes, fid=None) -> Node:
+        """Section IV-B-4: สร้าง node ที่ remap แล้วของ cloud นี้ พร้อม u.e (และ u.E, ID' ที่ leaf)
+        xs = { a | u.BF[a] = 1 } ของ BF_org (space ขนาด d); BF_temp ยาว d_u ของ node นี้ (optimized tree)"""
         new = Node(None)                          # node ใหม่ของ cloud นี้
         new.e = os.urandom(16)                    # u.e สุ่มไม่ซ้ำกันในแต่ละ cloud
-        xs = np.flatnonzero(node.bf)              # { a | u.BF[a] = 1 }
-        tmp = np.zeros(self.d, dtype=bool)        # BF_temp
-        tmp[prf_positions(new.e, xs, self.d)] = True  # BF_temp[h(u.e, x)] = 1
+        new.d = node_bf_length(len(xs), self.r, self.fp)  # d_u ของ node นี้ (Section IV-B-5)
+        tmp = np.zeros(new.d, dtype=bool)         # BF_temp
+        tmp[prf_positions(new.e, xs, new.d)] = True  # BF_temp[h(u.e, x)] = 1
         new.bf = np.packbits(tmp).tobytes()       # เก็บแบบ packed bytes (ประหยัด memory 8 เท่า)
-        if node.is_leaf():                        # leaf: ใส่ E และ encoded ID
-            fid = node.fid                        # file ID เดิม
-            bfb = self.bf_org_bytes[fid]          # BF_org ของไฟล์นี้
+        if fid is not None:                       # leaf: ใส่ E และ encoded ID
+            bfb = xs.astype(self.pos_dtype).tobytes()  # BF_org ของไฟล์นี้ (รายการตำแหน่ง) [ASSUMPTION] ข้อ 6
             nonce = os.urandom(12)                # nonce ของ AES-GCM
             new.E = nonce + AESGCM(self.kf).encrypt(nonce, bfb, None)  # u.E = Enc(k_f, u.BF_org)
-            new.slot = node.slot                  # ผูกกับ slice ที่เก็บใน cloud
+            new.slot = fid                        # ผูกกับ slice ที่เก็บใน cloud
             new.fid = self._encode_id(fid, cl.slices[fid], bfb, kfj)  # แทน fid ด้วย ID'_{i,j}
             cl.leaves.append(new)                 # จำ leaf ไว้
-        else:                                     # node ภายใน
-            # [ASSUMPTION] u.E ใช้เฉพาะ leaf ที่ถูกคืนใน Algorithm 2 จึงไม่สร้างให้ node ภายใน
-            new.pl = self._remap(node.pl, cl, kfj)  # remap ลูกซ้าย
-            new.pr = self._remap(node.pr, cl, kfj)  # remap ลูกขวา
+        # [ASSUMPTION] u.E ใช้เฉพาะ leaf ที่ถูกคืนใน Algorithm 2 จึงไม่สร้างให้ node ภายใน
         return new                                # คืน node ใหม่
 
     # ------------------------------------------------------------------ Query generation
@@ -541,8 +563,9 @@ class DuScheme:
                 except Exception:                 # ถอดไม่ได้
                     malicious.setdefault(j, []).append("E tampered")  # จับได้
                     continue                      # ข้ามรายการนี้
-                bits = np.unpackbits(np.frombuffer(bfb, np.uint8))[: self.d]  # แปลงกลับเป็น bit
-                if not bits[Qarr].all():          # filtering: มี x ใน Q ที่ BF_org[x] = 0
+                org = np.frombuffer(bfb, self.pos_dtype)  # BF_org = รายการตำแหน่งที่เป็น 1 (เรียงแล้ว)
+                k = np.searchsorted(org, Qarr)    # หา x แต่ละตัวของ Q ใน BF_org
+                if not ((k < org.size) & (org[np.minimum(k, org.size - 1)] == Qarr)).all():  # filtering: มี x ใน Q ที่ BF_org[x] = 0
                     # กรณี (2) irrelevant result และ remapping collision ของ cloud ที่ซื่อสัตย์
                     # ถูกกรองทิ้งด้วยวิธีเดียวกันตาม paper (Section IV-B-7) แยกสองกรณีนี้ไม่ได้
                     # จึงไม่กล่าวหา cloud แค่ตัดออก ผลลัพธ์สุดท้ายจึงยังถูกต้อง

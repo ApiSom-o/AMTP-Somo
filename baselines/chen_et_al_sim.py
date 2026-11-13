@@ -26,6 +26,7 @@ Simulation ของ baseline Chen et al. [40]
      (ถ้าสุ่มใหม่ทุกครั้ง ข้อมูลที่แชร์ไปก่อนหน้าจะค้นไม่เจอ)
   2. [FIX] CntDiffs เก็บแค่ Enc(w, c) แต่ Alg.4 บรรทัด 4 ต้องใช้ ST_c -> เข้ารหัส (w, c, ST_c)
   3. [FIX] Alg.5 return accept หลังเช็ค keyword แรก -> เช็คครบทุก keyword ก่อน accept
+     และ reject ถ้า CS ส่ง (Sum_e, proof) มาไม่ครบทุก keyword ใน q (selftest t_reject_dropped_keyword)
   4. [ASSUMPTION] F1 ไม่ระบุคีย์ -> ใช้ K'_u (DU คำนวณ proof ได้ แต่ CS ปลอมไม่ได้)
   5. [ASSUMPTION] ไม่ระบุ primitive -> HMAC-SHA256/512 (PRF), SHA-256 (H1, H2),
      SHAKE-256 (H3 ต้องได้ผลยาว gamma บิต), AES-256-GCM (SE), lambda = 128 บิต
@@ -639,6 +640,8 @@ class DataUser:
 
     # ---------------- Verify (Alg.5 L6-17) ----------------
     def verify(self, q, bitmaps, R) -> bool:
+        if len(R) != len(q) or len(bitmaps) != len(q):  # [L6] ต้องมี (Sum_e, proof) ครบทุก w_i ใน q
+            return False  # CS ตัดผลของบาง keyword ทิ้ง -> reject (zip จะตัดส่วนเกินทิ้งเงียบ ๆ)
         for w, bs_w, (_Sum_e, proof) in zip(q, bitmaps, R):  # [L6] for each w_i in q
             _, c = self.CT[w]  # [L7] (ST_c, c) <- CT[u][w_i]
             proof_p = xor(F1(self.K_prime_u, w, -1), F1(self.K_prime_u, w, c))  # [L8] F1(w||-1) ⊕ F1(w||c)
@@ -1284,6 +1287,14 @@ def run_selftest(_args=None):
         _, bms = du.decrypt(["cancer"], R)
         assert du.verify(["cancer"], bms, R) is False
 
+    def t_reject_dropped_keyword():  # CS ส่งผลไม่ครบทุก keyword ใน query (ตัด "bank" ทิ้ง) -> reject
+        do, cs, du = make()
+        du.sync(cs)
+        q = ["cancer", "bank"]
+        R = cs.search(du.gen_token(q))[:1]  # เหลือแค่ผลของ "cancer"
+        _, bms = du.decrypt(q, R)
+        assert du.verify(q, bms, R) is False
+
     def t_reject_forged():  # CS ปลอม proof -> reject
         do, cs, du = make()
         du.sync(cs)
@@ -1318,7 +1329,8 @@ def run_selftest(_args=None):
             edb.close()
 
     tests = [t_fig1, t_search, t_unknown, t_updates, t_aggregation, t_long_chain,  # รายการทดสอบทั้งหมด
-             t_reject_missing, t_reject_dropped, t_reject_forged, t_forward, t_multi_user, t_sqlite]
+             t_reject_missing, t_reject_dropped, t_reject_dropped_keyword, t_reject_forged, t_forward,
+             t_multi_user, t_sqlite]
     failed = 0  # นับข้อที่ไม่ผ่าน
     for t in tests:  # รันทีละข้อ
         try:
