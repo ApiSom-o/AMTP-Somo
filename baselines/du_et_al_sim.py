@@ -728,6 +728,9 @@ def run_query(sch, terms):
     info = dict(rQ=len(vr.fids), R_per_cloud=st.mean(R),  # จำนวนผลลัพธ์ที่ผ่าน / ต่อ cloud
                 filtered_out=vr.filtered_out,     # ผลจาก remapping collision ที่ถูกกรองทิ้ง
                 token_bytes=4 * len(Q),           # trapdoor = len(Q) ตำแหน่ง ตำแหน่งละ 4 byte ส่งให้ทุก cloud
+                # proof = หลักฐานที่ DU ใช้ตรวจ (E = Enc(BF_org), enc_id, e) ไม่รวม slice ของไฟล์
+                proof_bytes=sum(len(it["E"]) + len(it["enc_id"]) + len(it["e"])
+                                for items in responses.values() for it in items),
                 response_bytes=sum(len(it["E"]) + len(it["enc_id"]) + len(it["e"]) + len(it["slice"])
                                    for items in responses.values() for it in items),  # ที่ทุก cloud ส่งกลับ
                 ids=set(vr.fids))                 # ผลลัพธ์ (ไว้เทียบ ground truth ไม่เขียนลง CSV)

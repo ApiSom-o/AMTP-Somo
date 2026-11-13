@@ -12,12 +12,13 @@
 #                                  results; early-abort and full-check time, files named      (4 schemes)
 #   xsearch     Search 2.1         Boolean AND / OR queries over the 4 domains               (AMTP, SE-COLLAB)
 #   xverify     Verify 2.1         multi-domain keywords with ~10..10,000 results            (AMTP, SE-COLLAB)
-#   xdomains    Search / Verify 2.2  the same files as D = 1..32 domains                     (AMTP, SE-COLLAB)
-#   update      update cost (old Exp. 3), insert / delete batches                           (AMTP, Chen)
+#   xdomains    Search / Verify 2.2  the same files as D = 1..32 domains, kQ = XD_KQ, shapes XD_SHAPES (AMTP, SE-COLLAB)
+#   update      update cost at N = UPDATE_SIZES: one epoch of b signed requests, b in UPDATE_B;
+#               AMTP times CS prepare / owner Validator / anchor apart                     (AMTP, Chen)
 #   theta       θ sweep: query vs update cost
 #   splitmerge  split / merge: start with SM_N files, insert as many again (95% into one hot group), then delete
 #               65% of the hot group; θ_max = 64/128/256; layout + queries every SM_QUERY_EVERY batches
-#               (AMTP vs Static-MT vs Global-MT)
+#               (AMTP vs Static-MT vs Global-MT); one batch of SM_B updates = one epoch (b, recorded in the CSV)
 #
 # Settings (environment variables, defaults below). Commit the code first: every manifest records the
 # git commit and git_dirty. Logs go to $LOGS; a failed step is reported at the end, the others still run.
@@ -30,11 +31,15 @@ WARMUP=${WARMUP:-3}
 LOGS=${LOGS:-$HOME/amtp_logs}
 CHEN_OPTS=${CHEN_OPTS:---scope full --edb memory}     # full index in RAM; use "--scope auto" if RAM runs out
 SE_OPTS=${SE_OPTS:---proof-mode multi}
-UPDATE_SIZES=${UPDATE_SIZES:-10000 50000 100000 200000 500000}
+UPDATE_SIZES=${UPDATE_SIZES:-100000}                   # N (files from all 4 domains in one AMTP domain)
+UPDATE_B=${UPDATE_B:-1 10 100 1000}                    # b = signed requests per epoch
+XD_KQ=${XD_KQ:-4}                                      # xdomains: query kQ kept
+XD_SHAPES=${XD_SHAPES:-AND}                            # xdomains: query shapes kept
 THETA_N=${THETA_N:-200000}                           # needs shared exp1_queries.json at this N (10k..200k)
 THETA_VALUES=${THETA_VALUES:-64 128 256}
 SM_N=${SM_N:-100000}                                   # split / merge: initial files (all 4 domains, one AMTP domain)
-SM_BATCHES=${SM_BATCHES:-1000}                         # x 100 files inserted = SM_N (+100%), from the next initial files
+SM_B=${SM_B:-100}                                      # b: updates per batch = per epoch (b = 1 is ~2.4x slower)
+SM_BATCHES=${SM_BATCHES:-1000}                         # x SM_B files inserted = SM_N (+100%), from the next initial files
 SM_SKEWS=${SM_SKEWS:-0.95}                             # share of new files forced into the hot group
 SM_RUNS=${SM_RUNS:-3}
 SM_HOT_DELETE=${SM_HOT_DELETE:-0.65}                   # then delete this share of the hot group's files
@@ -89,12 +94,12 @@ step_xverify() {
   run xverify_secollab baselines "$PY" se_collab_sim.py xverify $COMMON $SE_OPTS
 }
 step_xdomains() {
-  run xdomains_amtp amtp_code "$PY" -m bench.experiments xdomains $COMMON
-  run xdomains_secollab baselines "$PY" se_collab_sim.py xdomains $COMMON $SE_OPTS
+  run xdomains_amtp amtp_code "$PY" -m bench.experiments xdomains $COMMON --x-kq $XD_KQ --shapes $XD_SHAPES
+  run xdomains_secollab baselines "$PY" se_collab_sim.py xdomains $COMMON $SE_OPTS --x-kq $XD_KQ --shapes $XD_SHAPES
 }
 step_update() {
-  run update_amtp amtp_code "$PY" -m bench.experiments exp3 $COMMON --sizes $UPDATE_SIZES
-  run update_chen baselines "$PY" chen_et_al_sim.py exp3 $COMMON --sizes $UPDATE_SIZES
+  run update_amtp amtp_code "$PY" -m bench.experiments exp3 $COMMON --sizes $UPDATE_SIZES --batches $UPDATE_B
+  run update_chen baselines "$PY" chen_et_al_sim.py exp3 $COMMON --sizes $UPDATE_SIZES --batches $UPDATE_B
 }
 step_theta() {
   run theta_amtp amtp_code "$PY" -m bench.experiments theta $COMMON --n "$THETA_N" --theta-values $THETA_VALUES
@@ -103,7 +108,7 @@ step_splitmerge() {
   local t
   for t in $SM_THETAS; do
     run "splitmerge_t$t" amtp_code "$PY" -m bench.ablation --source arxiv --n "$SM_N" \
-      --theta-max "$t" --theta-min $((t / 4)) --batches "$SM_BATCHES" --batch-size 100 --delete-frac 0 \
+      --theta-max "$t" --theta-min $((t / 4)) --batches "$SM_BATCHES" --batch-size "$SM_B" --delete-frac 0 \
       --fresh-source initial --skews "$SM_SKEWS" --runs "$SM_RUNS" --hot-delete-frac "$SM_HOT_DELETE" \
       --query-every "$SM_QUERY_EVERY" \
       --out "../baselines/results/amtp/splitmerge_n${SM_N}_t${t}"

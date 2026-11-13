@@ -2,7 +2,10 @@
 (the shape of Experiment 4 in the report).
 
     python -m bench.ablation --source synthetic --n 5000          # smoke test
-    python -m bench.ablation --source arxiv --n 100000 --runs 30  # shared arXiv dataset (dataset-v3)
+    python -m bench.ablation --source arxiv --n 100000 --runs 30  # shared arXiv dataset (dataset-v4)
+
+One update batch of --batch-size operations is ONE epoch (b = batch size, recorded as column "b"
+and in manifest.json). Sizes follow baselines/wire_sizes.py (binary, the rule of every scheme).
     python -m bench.ablation --source enron --enron ./maildir --n 100000 --runs 30
 
 Fairness built in:
@@ -31,6 +34,10 @@ from amtp.engine import Engine                                    # noqa: E402
 from amtp.server import build_response                            # noqa: E402
 from amtp.user import DataUser                                    # noqa: E402
 from amtp.variants import AdaptivePolicy, GlobalPolicy, StaticPolicy   # noqa: E402
+from bench.workload import REPO_ROOT                             # noqa: E402
+
+sys.path.insert(0, os.path.join(REPO_ROOT, "baselines"))
+import wire_sizes as W                                            # noqa: E402
 from bench.workload import (arxiv_docs, arxiv_loader, enron_docs, hot_delete_stream, keyword_bands,   # noqa: E402
                             make_queries, synthetic_docs, update_stream)
 
@@ -63,8 +70,7 @@ def run_queries(eng, queries, dht, verifier):
         t0 = time.perf_counter()
         resp = build_response(state, b_q, nonce, dht)
         server_ms = (time.perf_counter() - t0) * 1000
-        wire = json.dumps(resp)
-        resp = json.loads(wire)
+        resp = json.loads(json.dumps(resp))
         ctx = {"domain": DOMAIN, "B_Q": json.loads(json.dumps(b_q)), "epoch": state.epoch,
                "nonce": nonce, "R_D": state.R_D.hex()}
         rep = verifier.verify(ctx, resp)
@@ -76,7 +82,7 @@ def run_queries(eng, queries, dht, verifier):
             "keys_present": sum(e["status"] == "present" for e in ev),
             "partitions_covered": len(resp["proof"]["partitions"]),
             "server_ms": round(server_ms, 4), "verify_ms": rep["verify_ms"],
-            "proof_bytes": len(json.dumps(resp["proof"])), "response_bytes": len(wire),
+            "proof_bytes": W.amtp_proof_bytes(resp["proof"]), "response_bytes": W.amtp_response_bytes(resp),
         })
     return rows
 
@@ -115,7 +121,7 @@ def main():
     variants = ["AMTP", "Static-MT", "Global-MT"] + (["Global-MT(v)"] if a.global_versioned else [])
     skews = [float(s) for s in a.skews.split(",")]
     os.makedirs(a.out, exist_ok=True)
-    manifest = {"args": vars(a), "python": sys.version, "platform": platform.platform(),
+    manifest = {"args": vars(a), "b": a.batch_size, "python": sys.version, "platform": platform.platform(),
                 "machine": platform.machine(), "processor": platform.processor(),
                 "cpus": os.cpu_count(), "started": time.strftime("%Y-%m-%d %H:%M:%S")}
     if a.source == "arxiv":                     # same git commit / machine record as the other suites
@@ -159,7 +165,7 @@ def main():
                 stream, phases = stream + drops, phases + ["hot_delete"] * len(drops)
             for variant in variants:
                 eng = build(variant, initial, a)
-                tag = {"run": run, "variant": variant, "skew": skew}
+                tag = {"run": run, "variant": variant, "skew": skew, "b": a.batch_size}
                 splits = merges = 0
                 last_insert = phases.count("insert") - 1
 

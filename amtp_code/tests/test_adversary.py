@@ -19,7 +19,8 @@ def test_honest_server_has_no_attack_code():
     src = inspect.getsource(server_mod)
     for word in ("ATTACKS", "tamper", "forge", "fake_absent", "hide=", "offline=", "last_response"):
         assert word not in src, word
-    assert list(inspect.signature(server_mod.build_response).parameters) == ["state", "b_q", "nonce", "dht"]
+    assert list(inspect.signature(server_mod.build_response).parameters) == ["state", "b_q", "nonce", "dht",
+                                                                            "timing"]
 
 
 @pytest.mark.parametrize("mode", sorted(set(ATTACKS) - {"honest"}))

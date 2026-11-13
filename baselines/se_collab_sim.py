@@ -1753,7 +1753,7 @@ def suite_xdomains(args):
     ตามหมวด arXiv (domain_groups.csv) ส่ง query ทุกตัวของ boolean_multi ไปทุก owner
     ผลรวมต้องเท่ากับผลรวมราย domain ในไฟล์ (กลุ่มแบ่งไฟล์ชุดเดียวกัน)"""
     D = dataset()
-    qs = D.boolean_multi_queries()[:args.max_queries or None]
+    qs = D.select_queries(D.boolean_multi_queries(), args.x_kq, args.shapes, args.max_queries)
     names = list(D.DOMAINS)
     print(f"[xdomains] D={args.d_counts} files/domain={args.fix} queries={len(qs)} proof={args.proof_mode}")
     w = Writer("domains_scaling", args.out)
@@ -2054,6 +2054,9 @@ def main():
     ap.add_argument("--fix", type=int, default=Dm.V4_FIX, help="verify1 / xsearch / xverify / xdomains: ไฟล์ต่อ domain")
     ap.add_argument("--d-counts", type=int, nargs="+", default=Dm.D_COUNTS, help="xdomains: จำนวน domain")
     ap.add_argument("--max-queries", type=int, default=0, help="xdomains: ใช้ query n ตัวแรก (0 = ทั้งหมด)")
+    ap.add_argument("--x-kq", type=int, nargs="+", default=None, help="xdomains: เฉพาะ kQ เหล่านี้ (ค่าเริ่มต้น ทุกค่า)")
+    ap.add_argument("--shapes", nargs="+", default=None, choices=["AND", "OR", "AND_of_OR", "OR_of_AND"],
+                    help="xdomains: เฉพาะรูป query เหล่านี้ (ค่าเริ่มต้น ทุกแบบ)")
     ap.add_argument("--tamper-kinds", nargs="+", default=Dm.TAMPER_KINDS, choices=Dm.TAMPER_KINDS)
     ap.add_argument("--proof-mode", choices=["paths", "multi"], default="multi",
                     help="v4 suites: แบบ proof (multi = แบบที่เร็วกว่าใน Exp. 2)")

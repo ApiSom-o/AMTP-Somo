@@ -298,6 +298,13 @@ def boolean_multi_queries():
     return _jsonl("queries_boolean_multi.jsonl")
 
 
+def select_queries(qs, kqs=None, shapes=None, max_queries=0):
+    """The same query subset for every scheme: keep kQ in `kqs` and shape in `shapes` (None = all),
+    then the first max_queries (0 = all)."""
+    out = [q for q in qs if (not kqs or q["kQ"] in kqs) and (not shapes or q["shape"] in shapes)]
+    return out[:max_queries or None]
+
+
 def tamper_sets():
     """Verify 1.2: per domain at files_per_domain, query_keyword (~2,000 results, every t <= half of them), tamper_counts and the
     seeded tamper_order (doc_ids): tamper the first t doc_ids for every t."""

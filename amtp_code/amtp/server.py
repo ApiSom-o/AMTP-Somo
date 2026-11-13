@@ -99,14 +99,17 @@ class CloudServer:
         self._pending[domain] = (docs, deletes, seen)
         return proposal
 
-    def finalize_update(self, domain):
+    def finalize_update(self, domain, snapshot=True):
         """After the Root Anchor accepted the transition: expose the successor snapshot and drop
-        the ciphertexts of deleted documents (only now, as Phase 2 requires)."""
+        the ciphertexts of deleted documents (only now, as Phase 2 requires). snapshot=False skips
+        building the query snapshot (update-only benchmarks)."""
         docs, deletes, seen = self._pending.pop(domain)
         self.docs[domain] = {i: c for i, c in docs.items() if c is not None}
         self.request_nonces |= seen
         for cid in deletes:
             self.dht.delete(cid)
+        if not snapshot:
+            return None
         eng = self.engines[domain]
         state = eng.snapshot()
         if state.R_D != eng.R_D:
@@ -187,8 +190,11 @@ def evaluate_on_state(state, b_q) -> set:
     return boolean.evaluate(b_q, sets)
 
 
-def build_response(state, b_q, nonce, dht):
-    """R_Q = <i, e*, B_Q, η, R^part, R^idx, R^ct_Q, Π_Q> with ASPA multiproofs."""
+def build_response(state, b_q, nonce, dht, timing=None):
+    """R_Q = <i, e*, B_Q, η, R^part, R^idx, R^ct_Q, Π_Q> with ASPA multiproofs.
+    `timing` (a dict, benchmarks only) receives the time of each server phase in ms:
+    lookup (Search Tree + IMT evidence), eval (Boolean evaluation), proof (ASPA), fetch (DHT)."""
+    t0 = time.perf_counter()
     evidence, leaf_sets = [], {}
     for h in sorted(boolean.leaves(b_q)):
         hb = bytes.fromhex(h)
@@ -204,7 +210,9 @@ def build_response(state, b_q, nonce, dht):
             evidence.append(_absent_evidence(state, hb))
             leaf_sets[h] = set()
 
+    t1 = time.perf_counter()
     m_q = boolean.evaluate(b_q, leaf_sets)
+    t2 = time.perf_counter()
     m_cov = set().union(*leaf_sets.values()) if leaf_sets else set()
     # group the covered slots by partition once (O(|m_cov|)), instead of scanning
     # all of m_cov for every partition (O(|S_cov| x |m_cov|))
@@ -228,10 +236,15 @@ def build_response(state, b_q, nonce, dht):
                     "proof": [x.hex() for x in state.part_tree.multiproof(dom_positions)]
                     if dom_positions else []}
 
+    t3 = time.perf_counter()
     r_ct = []
     for cid, pid, slot in sorted(m_q, key=lambda x: (x[1], x[2])):
         ct = dht.get(bytes.fromhex(cid))     # raw CT bytes; may raise StorageError
         r_ct.append({"cid": cid, "pid": pid, "loc": slot, "ct": ct.hex()})   # hex on the JSON wire
+    if timing is not None:
+        t4 = time.perf_counter()
+        timing.update(lookup=(t1 - t0) * 1e3, eval=(t2 - t1) * 1e3, proof=(t3 - t2) * 1e3,
+                      fetch=(t4 - t3) * 1e3)
 
     return {
         "domain": state.domain, "epoch": state.epoch, "B_Q": b_q, "nonce": nonce,

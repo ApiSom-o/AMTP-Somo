@@ -86,12 +86,24 @@ class DataUser:
     def verify(self, ctx, resp):
         start = time.perf_counter()
         results, m_hat, failed = {}, None, None
+        phase, t = {}, time.perf_counter()
+
+        def lap(name):
+            nonlocal t
+            now = time.perf_counter()
+            phase[name] = (now - t) * 1e3
+            t = now
         try:
             m_h = self._check_ctx_anchor_idx(ctx, resp, results)
+            lap("idx")                                        # b_ctx, b_anchor, b_idx
             descs = self._check_papc(resp, m_h, results)
+            lap("papc")
             self._check_partitions(resp, m_h, descs, results)
+            lap("part")
             m_hat = self._check_result(ctx, resp, m_h, results)
+            lap("comp")
             self._check_ciphertexts(ctx, resp, results)
+            lap("ct")
         except Reject as r:
             results[r.check] = (False, r.detail)
             failed = r.check
@@ -106,7 +118,7 @@ class DataUser:
                               "ok": ok, "detail": detail})
         return {"accepted": failed is None, "failed": failed, "checks": checklist,
                 "M_hat": sorted(m_hat) if m_hat is not None else None,
-                "verify_ms": round((time.perf_counter() - start) * 1000, 2)}
+                "verify_ms": round((time.perf_counter() - start) * 1000, 2), "phase_ms": phase}
 
     def _check_ctx_anchor_idx(self, ctx, resp, results):
         # b_ctx

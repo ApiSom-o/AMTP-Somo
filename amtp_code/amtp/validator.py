@@ -192,6 +192,24 @@ class Validator:
         self.R_D = domain_root(domain, 0, self.R_part, self.R_idx)
         self._pending = None
 
+    @classmethod
+    def bootstrap(cls, domain, signer, policy, eng, docs, owner_keys):
+        """Trusted metadata for an index the owner built itself and anchored (benchmark set-up, where
+        the initial N documents are loaded in bulk). `docs` maps document id -> cid."""
+        v = cls.__new__(cls)
+        v.domain, v.signer, v.policy, v.owner_keys = domain, signer, policy, list(owner_keys)
+        v.slots = {p: list(part.slots) for p, part in eng.parts.items()}
+        v.v = {p: part.v for p, part in eng.parts.items()}
+        v.live = dict(eng.live)
+        v.loc, v.fwd, v.doc = dict(eng.loc), dict(eng.fwd), dict(docs)
+        v.pid_counter = eng._pid_counter
+        v.used_pids = {H("pid", domain, k).hex()[:16] for k in range(1, eng._pid_counter + 1)}
+        v.used_nonces = set()
+        v.epoch, v.imt_n = eng.epoch, len(eng.imt_layout)
+        v.R_part, v.R_idx, v.R_D = eng.part_tree.root, eng.imt.root, eng.R_D
+        v._pending = None
+        return v
+
     # ================================================================ main check
     def check(self, proposal: dict, requests) -> bytes:
         """Validate one proposed transition; returns σ_root, or raises Invalid."""

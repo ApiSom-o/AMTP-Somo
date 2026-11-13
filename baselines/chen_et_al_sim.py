@@ -70,6 +70,9 @@ from dataclasses import dataclass                 # โครงสร้าง�
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # AES-GCM สำหรับ SE
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import wire_sizes as W                            # noqa: E402  กติกานับขนาดเดียวกันทุก scheme
+
 
 # ============================================================================
 # 0) ตัวนับจำนวน operation  -> ใช้เช็กว่าจำนวน T_PRF / T_H / ... ตรงกับสูตรใน Table IV
@@ -683,9 +686,20 @@ def dataset():
     return amtp_dataset                           # คืน module
 
 
+FILE_LEN = {}                                     # ตำแหน่งบิต -> ขนาด plaintext ของไฟล์ (ใช้นับ response_bytes)
+
+
 def to_chen(docs, start: int = 0):
     """แปลง Doc ของ dataset -> (ตำแหน่งบิต, set(keywords)) ที่ DataOwner ของ Chen ใช้
-    bitmap ต้องใช้เลข 0..gamma-1 แทน id เอกสาร จึงใช้ลำดับในรายการเป็นตำแหน่งบิต"""
+    bitmap ต้องใช้เลข 0..gamma-1 แทน id เอกสาร จึงใช้ลำดับในรายการเป็นตำแหน่งบิต
+    และจำขนาดไฟล์ของแต่ละตำแหน่งไว้ใน FILE_LEN: [40] คืนแค่ bitmap ไม่ได้คืนไฟล์ จึงคิดขนาด
+    ciphertext มาตรฐาน AES-GCM ของไฟล์ผลลัพธ์ตามกติกากลาง (wire_sizes.py)"""
+    root = dataset().load()["dir"] if docs and hasattr(docs[0], "file_path") else None
+    if start == 0:
+        FILE_LEN.clear()
+    for i, d in enumerate(docs):
+        if root is not None:
+            FILE_LEN[start + i] = os.path.getsize(os.path.join(root, d.file_path))
     return [(start + i, set(d.keywords)) for i, d in enumerate(docs)]  # keyword ไม่ซ้ำในไฟล์อยู่แล้ว
 
 
@@ -836,9 +850,11 @@ def run_query(du, cs, q):
                xor_search=c_s["xor"], visited=c_s["visited"], prf_verify=c_v["prf"], xor_verify=c_v["xor"])
     nbytes = cs.he.nbytes                         # ขนาด Sum_e 1 ก้อน
     info = dict(rQ=len(ids), pQ=sum(popcount(b) for b in bitmaps),  # จำนวนผลลัพธ์ / ผลรวม posting
-                proof_bytes=len(R) * PROOF_BYTES,  # ขนาด proof (32 byte ต่อ keyword)
+                proof_bytes=len(R) * W.HASH,      # ขนาด proof (vt 32 byte ต่อ keyword)
                 token_bytes=sum(t.size_bytes() for t in tokens),  # ขนาด token ที่ DU ส่ง
-                response_bytes=len(R) * (nbytes + PROOF_BYTES),  # ขนาด R ที่ CS ส่งกลับ
+                # response = (Sum_e + vt) ต่อ keyword + ไฟล์ผลลัพธ์ (id + ciphertext มาตรฐาน) ตาม wire_sizes.py
+                response_bytes=len(R) * (nbytes + W.HASH)
+                + sum(W.result_entry_bytes(W.std_ct_bytes(FILE_LEN.get(i, 0))) for i in ids),
                 ids=set(ids))                     # ผลลัพธ์ (ไว้เทียบกับ ground truth ไม่เขียนลง CSV)
     return times, ops, info                       # คืนผล
 
