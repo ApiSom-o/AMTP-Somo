@@ -48,6 +48,9 @@ class DHT:
                 return ct
         raise StorageError(f"no valid replica for ciphertext {cid.hex()[:8]}")
 
+    def has(self, cid: bytes) -> bool:
+        return any(cid in self.store[node] for node in self._owners(cid))
+
     def delete(self, cid: bytes):
         """Remove CT from every replica (after the deleting transition is finalized)."""
         for node in self._owners(cid):

@@ -157,16 +157,25 @@ Defaults in the text: 4 keywords per query; reported values averaged over runs a
 
 These are places where the draft and the current code/data disagree or the draft is unfinished:
 
-1. **Dataset text is outdated.** Sec. V-B says Enron + synthetic replication, 10⁴–10⁶ records. The repo now
-   uses the arXiv dataset-v4 (4 domains × 125,000 + 12,500 insert pool each, RAKE κ = 20), so at most
-   125,000 files per domain and 500,000 in total (`datasets/README.md`). Exp. 1 sizes (5·10⁵, 10⁶) and
-   Exp. 2/3 `N = 10⁶` need to be changed to fit, or the dataset extended.
-2. **Setup placeholders** still open: language/version, machine, OS, libraries, hash, AEAD, signature
-   scheme, DHT implementation, `n` nodes, replication `r`, number of runs/warm-up, `θ_max = [X]`,
-   `θ_min = [Y]`, number of domains `[X]`.
-3. Broken figure references (`Fig. ??`) in Sec. III-A and III-C.
+1. **Dataset text is outdated.** Sec. V-B (draft AMTP (15)) describes arXiv version 308 with domains cs, math,
+   physics, stat, 50,000 initial + 5,000 insert-pool documents per domain, RAKE κ = 10 and
+   `N ∈ {10⁴, 5·10⁴, 10⁵, 2·10⁵}`. The repo now uses dataset-v4: domains cs, math, astro-hep,
+   condmat-quant, 125,000 initial + 12,500 insert-pool documents per domain (500,000 + 50,000), RAKE κ = 20
+   (`datasets/README.md`). The domains, sizes, κ ("at most ten keywords per document") and the N values of
+   every experiment must follow the advisor's plan on dataset-v4.
+2. **Setup text describes the test machine.** Draft AMTP (15) fills in the setup (Python 3.12, MacBook Pro M3,
+   cryptography v50.0.2, θ_max = 64, θ_min = 16, 30 runs + 3 warm-up). It must be rewritten for the cloud
+   machine and the Python and library versions the final results are measured with.
+3. Figure references in Sec. III-A and III-C are fixed in draft AMTP (15) (Fig. 1, Fig. 2).
 4. Theorem 1 statement (86) repeats the definition of `Bad_Q` instead of stating the bound
    `Pr[Bad_Q] ≤ Adv^CR_H(B, λ)` (the bound appears only at the end of the proof, (94)).
 5. The demo in `amtp_code/` uses `θ_min = 1, θ_max = 4` to show splits on little data (so a merge only
    happens when a partition empties). It runs the full Phase 2 protocol (signed requests, Validator, Δ);
    CP-ABE and ABS are stand-ins there (see `amtp_code/README_TH.md`).
+6. **Exp. 3 update latency.** The draft says "DO transition validation is not included in the update
+   latency". The code reports `update_ms = server_ms + validate_ms + anchor_ms` and each part separately
+   (`amtp_exp3_dynamic_update.csv`). Decide which column the figure uses and make the text say the same.
+7. **Rejected candidates.** A candidate rejected by the owner's Validator or the Root Anchor is discarded
+   (`CloudServer.abort_update`, undo log in `Engine`) and the Cloud Server returns to the finalized
+   predecessor, as Phase 2, Step 5 requires ("obsolete proposals must be regenerated against the current
+   predecessor"). Keeping the undo log costs about 5% of the server's update time.

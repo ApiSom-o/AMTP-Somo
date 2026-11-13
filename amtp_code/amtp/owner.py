@@ -108,9 +108,13 @@ class DataOwner:
         """One epoch: the CS prepares the candidate, this owner validates it and signs σ_root,
         the Root Anchor accepts it, then both sides advance. Raises validator.Invalid."""
         proposal = self.server.prepare_update(self.domain, requests)
-        sig = self.validator.check(proposal, requests)
-        self.anchor.submit(self.domain, proposal["epoch_new"], proposal["R_new"], sig,
-                           proposal["delta"], prev=proposal["R_old"])
+        try:
+            sig = self.validator.check(proposal, requests)
+            self.anchor.submit(self.domain, proposal["epoch_new"], proposal["R_new"], sig,
+                               proposal["delta"], prev=proposal["R_old"])
+        except Exception:
+            self.server.abort_update(self.domain)     # the CS falls back to the finalized state
+            raise
         self.validator.advance()
         self.structure_log += [r for r in proposal["aff"] if r[0] in ("split", "merge")]
         return self.server.finalize_update(self.domain)

@@ -42,21 +42,36 @@ class MerkleTree:
     def root(self) -> bytes:
         return self.levels[-1][0]
 
-    def set_leaf(self, i: int, value: bytes):
-        """Replace leaf i and recompute only its path to the root (log n hashes)."""
+    def set_leaf(self, i: int, value: bytes, undo: list = None):
+        """Replace leaf i and recompute only its path to the root (log n hashes).
+        undo: if given, an action that restores the old path is appended to it."""
+        if undo is not None:
+            saved, j = [], i
+            for level in self.levels:
+                saved.append(level[j])
+                j //= 2
+            undo.append(lambda leaf=i: self._restore_path(leaf, saved))   # i changes below
         self.levels[0][i] = leaf_hash(value)
         for d in range(1, len(self.levels)):
             i //= 2
             below = self.levels[d - 1]
             self.levels[d][i] = node_hash(below[2 * i], below[2 * i + 1])
 
-    def try_append(self, value: bytes) -> bool:
+    def _restore_path(self, i: int, saved: list):
+        for level, old in zip(self.levels, saved):
+            level[i] = old
+            i //= 2
+
+    def try_append(self, value: bytes, undo: list = None) -> bool:
         """Fill the next padding slot in place. False if the tree is full
         (the caller then rebuilds with a doubled size)."""
         if self.n >= len(self.levels[0]):
             return False
-        self.set_leaf(self.n, value)
+        n_old = self.n
+        self.set_leaf(self.n, value, undo)
         self.n += 1
+        if undo is not None:
+            undo.append(lambda: setattr(self, "n", n_old))
         return True
 
     def multiproof(self, indices) -> list:

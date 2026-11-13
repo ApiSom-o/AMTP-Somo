@@ -64,7 +64,20 @@ class CloudServer:
         if not requests or len(requests) > eng.ops_per_epoch:
             raise ValueError(f"an epoch takes 1..{eng.ops_per_epoch} requests")
         r_old, r_part_old, r_idx_old = eng.R_D, eng.part_tree.root, eng.imt.root
-        docs, seen, placements, deletes = dict(self.docs[domain]), set(), [], []
+        docs, seen, placements, deletes, stored = dict(self.docs[domain]), set(), [], [], []
+        eng.begin()                       # working successor: every change can be rolled back
+        try:
+            proposal = self._prepare(domain, eng, requests, docs, seen, placements, deletes, stored,
+                                     r_old, r_part_old, r_idx_old)
+        except Exception:
+            eng.rollback()
+            self._drop_stored(stored)
+            raise
+        self._pending[domain] = (docs, deletes, seen, stored)
+        return proposal
+
+    def _prepare(self, domain, eng, requests, docs, seen, placements, deletes, stored,
+                 r_old, r_part_old, r_idx_old):
         for req in requests:
             u, sig = req["U"], req["sig"]
             if not any(sig_ok(k, request_digest(u), sig) for k in self.owner_keys[domain]):
@@ -78,6 +91,8 @@ class CloudServer:
                 cid = H(u["ct"])
                 if docs.get(u["id"]) is not None or cid in eng.loc:
                     raise ValueError("identifier or ciphertext already live")
+                if not self.dht.has(cid):
+                    stored.append(cid)
                 self.dht.put(cid, u["ct"])
                 placements.append(list(eng.insert(cid, {H(c) for c in u["C"]}, u["bucket"])))
                 docs[u["id"]] = cid
@@ -96,21 +111,34 @@ class CloudServer:
                     "R_old": r_old, "R_new": eng.R_D, "placements": placements,
                     "aff": st["aff"], "delta": d, "pi": pi, "stats": {k: v for k, v in st.items()
                                                                        if k not in ("aff", "pi")}}
-        self._pending[domain] = (docs, deletes, seen)
         return proposal
+
+    def abort_update(self, domain):
+        """The candidate was rejected (by the owner's Validator or the Root Anchor): discard it and
+        restore the finalized predecessor, so a new candidate can be prepared against it (Phase 2,
+        Step 5: obsolete proposals are regenerated against the current predecessor)."""
+        _, _, _, stored = self._pending.pop(domain)
+        self.engines[domain].rollback()
+        self._drop_stored(stored)
+
+    def _drop_stored(self, cids):
+        for cid in cids:                  # ciphertexts first stored by the discarded candidate
+            self.dht.delete(cid)
 
     def finalize_update(self, domain, snapshot=True):
         """After the Root Anchor accepted the transition: expose the successor snapshot and drop
         the ciphertexts of deleted documents (only now, as Phase 2 requires). snapshot=False skips
         building the query snapshot (update-only benchmarks)."""
-        docs, deletes, seen = self._pending.pop(domain)
+        docs, deletes, seen, _ = self._pending.pop(domain)
+        eng = self.engines[domain]
+        eng.accept()
         self.docs[domain] = {i: c for i, c in docs.items() if c is not None}
         self.request_nonces |= seen
         for cid in deletes:
-            self.dht.delete(cid)
+            if cid not in eng.loc:        # not re-inserted by the same batch
+                self.dht.delete(cid)
         if not snapshot:
             return None
-        eng = self.engines[domain]
         state = eng.snapshot()
         if state.R_D != eng.R_D:
             raise RuntimeError("incremental R_D differs from the full rebuild")

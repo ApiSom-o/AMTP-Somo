@@ -13,10 +13,16 @@ Updates follow the report's Phase 2-3:
   * the IMT is an indexed Merkle tree: a new key is appended (or reuses a freed
     position) and its predecessor's next pointer is updated, a removed key frees
     its position and relinks its predecessor, so a key-set change costs O(log K)
+
+Working successor (Phase 2, Step 5): between begin() and accept() every change is recorded in an
+undo log, so a candidate the owner's Validator or the Root Anchor rejects is discarded with
+rollback(), which restores the finalized predecessor exactly ("obsolete proposals must be
+regenerated against the current predecessor"). The log holds only what the batch changed.
 """
 import bisect
 import time
 from collections import Counter
+from functools import partial
 
 from .bptree import BPlusTree
 from .core.hashing import H, HashCounter, enc_posting
@@ -25,6 +31,15 @@ from .index import (EMPTY_SLOT, IMT_EMPTY, SENTINEL_LO, ZERO, DomainState, Parti
                     domain_root, gamma, imt_leaf, imt_next, rho, sorted_imt_layout)
 from .update import aff_records
 from .core.merkle import MerkleTree, tree_size
+
+_MISSING = object()
+
+
+def _restore(d, k, old):
+    if old is _MISSING:
+        d.pop(k, None)
+    else:
+        d[k] = old
 
 
 class Engine:
@@ -46,6 +61,8 @@ class Engine:
         self.keys_in = {}                      # pid -> Counter(h)
         self.gam, self.rho = {}, {}            # h -> {pid: γ} / h -> ρ
         self.post = {}                         # h -> (pid order, MerkleTree over γ) for R^post
+        self._undo = None                      # undo log of the open working successor, if any
+        self._cuckoo_stale = False
         self._reset_dirty()
         for buckets in policy.initial_lineages():
             self._new_partition([], frozenset(buckets))
@@ -53,6 +70,119 @@ class Engine:
         self._rebuild_part_tree()
         self._rebuild_imt()
         self.R_D = domain_root(domain, 0, self.part_tree.root, self.imt.root)
+
+    # ------------------------------------------------- working successor
+    def begin(self):
+        """Open a working successor of the finalized state: record every change until accept()."""
+        if self._undo is not None:
+            raise ValueError("a working successor is already open")
+        if self.pending_ops:
+            raise ValueError("uncommitted operations outside a working successor")
+        self._undo = []
+
+    def accept(self):
+        """The successor was finalized (validated and anchored): drop the undo log."""
+        self._undo = None
+
+    def rollback(self):
+        """Discard the working successor and restore the finalized predecessor exactly."""
+        undo, self._undo = self._undo, None
+        if undo is None:
+            raise ValueError("no working successor is open")
+        for action in reversed(undo):
+            action()
+        self._reset_dirty()
+        if self._cuckoo_stale:                  # a re-insert did not fit: rebuild from the keys
+            self.cuckoo = CuckooFilter.from_keys(self.comp.keys(), 2 * len(self.comp))
+            self._cuckoo_stale = False
+
+    @property
+    def in_progress(self) -> bool:
+        return self._undo is not None
+
+    # every in-place change below goes through these, so rollback() can undo it
+    def _set(self, d, k, v):
+        if self._undo is not None:
+            self._undo.append(partial(_restore, d, k, d.get(k, _MISSING)))
+        d[k] = v
+
+    def _pop(self, d, k):
+        v = d.pop(k)
+        if self._undo is not None:
+            self._undo.append(partial(d.__setitem__, k, v))
+        return v
+
+    def _attr(self, obj, name, v):
+        if self._undo is not None:
+            self._undo.append(partial(setattr, obj, name, getattr(obj, name)))
+        setattr(obj, name, v)
+
+    def _lset(self, lst, i, v):
+        if self._undo is not None:
+            self._undo.append(partial(lst.__setitem__, i, lst[i]))
+        lst[i] = v
+
+    def _lappend(self, lst, v):
+        lst.append(v)
+        if self._undo is not None:
+            self._undo.append(lst.pop)
+
+    def _lpop(self, lst):
+        v = lst.pop()
+        if self._undo is not None:
+            self._undo.append(partial(lst.append, v))
+        return v
+
+    def _linsert(self, lst, i, v):
+        lst.insert(i, v)
+        if self._undo is not None:
+            self._undo.append(partial(lst.__delitem__, i))
+
+    def _ldel(self, lst, i):
+        v = lst[i]
+        del lst[i]
+        if self._undo is not None:
+            self._undo.append(partial(lst.insert, i, v))
+
+    def _sadd(self, st, x):
+        if x not in st:
+            st.add(x)
+            if self._undo is not None:
+                self._undo.append(partial(st.discard, x))
+
+    def _sdiscard(self, st, x):
+        if x in st:
+            st.discard(x)
+            if self._undo is not None:
+                self._undo.append(partial(st.add, x))
+
+    def _comp_add(self, h, by_pid):
+        """A key enters the index: Search Tree entry and Cuckoo filter, once."""
+        self.comp.insert(h, by_pid)
+        if self._undo is not None:
+            self._undo.append(partial(self.comp.pop, h))
+        c = self.cuckoo
+        if c.insert(h):
+            if self._undo is not None:
+                self._undo.append(partial(c.delete, h))
+        else:                                   # filter full: a bigger one (the old one is unchanged)
+            self._attr(self, "cuckoo", CuckooFilter.from_keys(self.comp.keys(), 2 * len(self.comp)))
+
+    def _comp_remove(self, h) -> bool:
+        """A key leaves the index: Search Tree entry and Cuckoo filter, once."""
+        v = self.comp.pop(h, _MISSING)
+        if v is _MISSING:
+            return False
+        c = self.cuckoo
+        c.delete(h)
+        if self._undo is not None:
+            self._undo.append(partial(self.comp.insert, h, v))
+            self._undo.append(partial(self._cuckoo_reinsert, c, h))
+        return True
+
+    def _cuckoo_reinsert(self, c, h):
+        if not c.insert(h):
+            self._cuckoo_stale = True
 
     # ------------------------------------------------------------ updates
     @property
@@ -63,19 +193,19 @@ class Engine:
         """Place cid; returns its location (PID, ℓ)."""
         if cid in self.loc:
             raise ValueError("cid already live")
-        self.fwd[cid] = frozenset(keys)
+        self._set(self.fwd, cid, frozenset(keys))
         pid = self.policy.place(self, bucket)
         p = self.parts[pid]
         if self.free[pid]:
-            slot = self.free[pid].pop()
-            p.slots[slot] = cid
-            self.trees[pid].set_leaf(slot, cid)
+            slot = self._lpop(self.free[pid])
+            self._lset(p.slots, slot, cid)
+            self.trees[pid].set_leaf(slot, cid, self._undo)
         else:
             slot = len(p.slots)
-            p.slots.append(cid)
-            if not self.trees[pid].try_append(cid):
-                self.trees[pid] = MerkleTree(p.slots)        # capacity doubled
-        self.live[pid] += 1
+            self._lappend(p.slots, cid)
+            if not self.trees[pid].try_append(cid, self._undo):
+                self._set(self.trees, pid, MerkleTree(p.slots))        # capacity doubled
+        self._set(self.live, pid, self.live[pid] + 1)
         self._attach(cid, pid, slot)
         self._touch(pid)
         self._ops.append(("insert", cid, pid, slot))
@@ -86,13 +216,13 @@ class Engine:
         pid, slot = self.loc[cid]
         self._ops.append(("delete", cid, pid, slot))
         self.pending_ops += 1
-        self.parts[pid].slots[slot] = EMPTY_SLOT              # tombstone ⊥
-        self.trees[pid].set_leaf(slot, EMPTY_SLOT)
-        self.free[pid].append(slot)
-        self.live[pid] -= 1
+        self._lset(self.parts[pid].slots, slot, EMPTY_SLOT)        # tombstone ⊥
+        self.trees[pid].set_leaf(slot, EMPTY_SLOT, self._undo)
+        self._lappend(self.free[pid], slot)
+        self._set(self.live, pid, self.live[pid] - 1)
         self._detach(cid, pid)
-        del self.loc[cid]
-        del self.fwd[cid]
+        self._pop(self.loc, cid)
+        self._pop(self.fwd, cid)
         self._touch(pid)
 
     def commit(self, evidence: bool = False) -> dict:
@@ -110,7 +240,7 @@ class Engine:
                 continue
             v_old = self.parts[pid].v
             if self.policy.versioned:
-                self.parts[pid].v += 1
+                self._attr(self.parts[pid], "v", v_old + 1)
                 for h in self.keys_in[pid]:
                     self._dirty_comp.add((h, pid))
             parts_changed[pid] = (v_old, self.parts[pid].v)
@@ -127,7 +257,7 @@ class Engine:
             self._rebuild_part_tree()
         else:
             for pid in self._modified:
-                self.part_tree.set_leaf(self.part_pos[pid], self._A(pid))
+                self.part_tree.set_leaf(self.part_pos[pid], self._A(pid), self._undo)
 
         dirty_pids = {}
         for h, pid in self._dirty_comp:
@@ -136,27 +266,32 @@ class Engine:
             entries = self.comp.get(h, {}).get(pid)
             if entries and pid in self.parts:
                 comp = sorted(entries.items(), key=lambda e: e[1])
-                self.gam.setdefault(h, {})[pid] = gamma(pid, self.parts[pid].v, comp)
-            elif h in self.gam:
-                self.gam[h].pop(pid, None)
+                g = self.gam.get(h)
+                if g is None:
+                    g = {}
+                    self._set(self.gam, h, g)
+                self._set(g, pid, gamma(pid, self.parts[pid].v, comp))
+            elif pid in self.gam.get(h, ()):
+                self._pop(self.gam[h], pid)
 
         added, removed = [], []
         for h in self._dirty_keys:
             if self.comp.get(h):
                 if h not in self.rho:
                     added.append(h)
-                self.rho[h] = rho(h, len(self.comp[h]), self._post_root(h, dirty_pids[h]))
+                self._set(self.rho, h, rho(h, len(self.comp[h]), self._post_root(h, dirty_pids[h])))
             else:
-                if self.comp.pop(h, None) is not None:
-                    self.cuckoo.delete(h)          # the key left the index: remove it once
-                self.gam.pop(h, None)
-                self.post.pop(h, None)
-                if self.rho.pop(h, None) is not None:
+                self._comp_remove(h)               # the key left the index: remove it once
+                for d in (self.gam, self.post):
+                    if h in d:
+                        self._pop(d, h)
+                if h in self.rho:
+                    self._pop(self.rho, h)
                     removed.append(h)
         self._update_imt(added, removed)
 
-        self.epoch += 1
-        self.R_D = domain_root(self.domain, self.epoch, self.part_tree.root, self.imt.root)
+        self._attr(self, "epoch", self.epoch + 1)
+        self._attr(self, "R_D", domain_root(self.domain, self.epoch, self.part_tree.root, self.imt.root))
         c1, b1 = HashCounter.snapshot()
         stats = {
             "update_ms": (time.perf_counter() - t0) * 1000,
@@ -211,15 +346,19 @@ class Engine:
 
     # ------------------------------------------------------------ helpers
     def _new_partition(self, cids, lineage):
-        self._pid_counter += 1
+        self._attr(self, "_pid_counter", self._pid_counter + 1)
         pid = H("pid", self.domain, self._pid_counter).hex()[:16]
         p = Partition(pid=pid, v=0, slots=list(cids))
-        self.parts[pid] = p
-        self.trees[pid] = MerkleTree(p.slots)
-        self.lineage[pid] = lineage
+        self._set(self.parts, pid, p)
+        self._set(self.trees, pid, MerkleTree(p.slots))
+        self._set(self.lineage, pid, lineage)
         for b in lineage:
-            self.by_bucket.setdefault(b, set()).add(pid)
-        self.live[pid], self.free[pid], self.keys_in[pid] = len(cids), [], Counter()
+            if b not in self.by_bucket:
+                self._set(self.by_bucket, b, set())
+            self._sadd(self.by_bucket[b], pid)
+        self._set(self.live, pid, len(cids))
+        self._set(self.free, pid, [])
+        self._set(self.keys_in, pid, Counter())
         for slot, cid in enumerate(cids):
             self._attach(cid, pid, slot)
         self._new.add(pid)
@@ -230,10 +369,10 @@ class Engine:
             self._start_loc.setdefault(cid, self.loc[cid])      # first location in this batch
             self._detach(cid, pid)
         for b in self.lineage[pid]:
-            self.by_bucket[b].discard(pid)
+            self._sdiscard(self.by_bucket[b], pid)
         self._v_of_retired[pid] = self.parts[pid].v
         for d in (self.parts, self.trees, self.lineage, self.live, self.free, self.keys_in):
-            del d[pid]
+            self._pop(d, pid)
         self._modified.discard(pid)
         if pid in self._new:
             self._new.discard(pid)          # created and retired in the same batch
@@ -242,27 +381,33 @@ class Engine:
             self._retired_v[pid] = self._v_of_retired.pop(pid)
 
     def _attach(self, cid, pid, slot):
-        self.loc[cid] = (pid, slot)
+        self._set(self.loc, cid, (pid, slot))
+        counts = self.keys_in[pid]
         for h in self.fwd[cid]:
             by_pid = self.comp.get(h)
             if by_pid is None:                     # the key enters the index: add it once
                 by_pid = {}
-                self.comp.insert(h, by_pid)
-                if not self.cuckoo.insert(h):
-                    self.cuckoo = CuckooFilter.from_keys(self.comp.keys(), 2 * len(self.comp))
-            by_pid.setdefault(pid, {})[cid] = slot
-            self.keys_in[pid][h] += 1
+                self._comp_add(h, by_pid)
+            entries = by_pid.get(pid)
+            if entries is None:
+                entries = {}
+                self._set(by_pid, pid, entries)
+            self._set(entries, cid, slot)
+            self._set(counts, h, counts[h] + 1)
             self._dirty_comp.add((h, pid))
 
     def _detach(self, cid, pid):
+        counts = self.keys_in[pid]
         for h in self.fwd[cid]:
-            entries = self.comp[h][pid]
-            del entries[cid]
+            by_pid = self.comp[h]
+            entries = by_pid[pid]
+            self._pop(entries, cid)
             if not entries:
-                del self.comp[h][pid]
-            self.keys_in[pid][h] -= 1
-            if not self.keys_in[pid][h]:
-                del self.keys_in[pid][h]
+                self._pop(by_pid, pid)
+            if counts[h] > 1:
+                self._set(counts, h, counts[h] - 1)
+            else:
+                self._pop(counts, h)
             self._dirty_comp.add((h, pid))
 
     def _touch(self, pid):
@@ -278,11 +423,11 @@ class Engine:
             order, tree = cached
             for pid in changed:
                 if pid in order:
-                    tree.set_leaf(order[pid], self.gam[h][pid])
+                    tree.set_leaf(order[pid], self.gam[h][pid], self._undo)
             return tree.root
         pids = sorted(sel)
         tree = MerkleTree([self.gam[h][p] for p in pids])
-        self.post[h] = ({p: i for i, p in enumerate(pids)}, tree)
+        self._set(self.post, h, ({p: i for i, p in enumerate(pids)}, tree))
         return tree.root
 
     def _A(self, pid):
@@ -290,6 +435,10 @@ class Engine:
 
     def _rebuild_part_tree(self):
         order = sorted(self.parts)
+        if self._undo is not None:
+            self._attr(self, "part_pos", {pid: i for i, pid in enumerate(order)})
+            self._attr(self, "part_tree", MerkleTree([self._A(pid) for pid in order]))
+            return
         self.part_pos = {pid: i for i, pid in enumerate(order)}
         self.part_tree = MerkleTree([self._A(pid) for pid in order])
 
@@ -313,34 +462,34 @@ class Engine:
         for h in sorted(removed):
             i = bisect.bisect_left(self.imt_sorted, h)
             prev = self.imt_sorted[i - 1] if i else SENTINEL_LO
-            self.imt_nxt[prev] = self.imt_nxt.pop(h)
-            del self.imt_sorted[i]
-            pos = self.imt_pos.pop(h)
-            self.imt_layout[pos] = None
-            self.imt_free.append(pos)
+            self._set(self.imt_nxt, prev, self._pop(self.imt_nxt, h))
+            self._ldel(self.imt_sorted, i)
+            pos = self._pop(self.imt_pos, h)
+            self._lset(self.imt_layout, pos, None)
+            self._lappend(self.imt_free, pos)
             dirty |= {pos, self.imt_pos[prev]}
         appended = []
         for h in sorted(added):
             i = bisect.bisect_left(self.imt_sorted, h)
             prev = self.imt_sorted[i - 1] if i else SENTINEL_LO
-            self.imt_nxt[h] = self.imt_nxt[prev]
-            self.imt_nxt[prev] = h
-            self.imt_sorted.insert(i, h)
+            self._set(self.imt_nxt, h, self.imt_nxt[prev])
+            self._set(self.imt_nxt, prev, h)
+            self._linsert(self.imt_sorted, i, h)
             if self.imt_free:
-                pos = self.imt_free.pop()
-                self.imt_layout[pos] = h
+                pos = self._lpop(self.imt_free)
+                self._lset(self.imt_layout, pos, h)
                 dirty.add(pos)
             else:
                 pos = len(self.imt_layout)
-                self.imt_layout.append(h)
+                self._lappend(self.imt_layout, h)
                 appended.append(pos)
-            self.imt_pos[h] = pos
+            self._set(self.imt_pos, h, pos)
             dirty.add(self.imt_pos[prev])
         for pos in sorted(dirty - set(appended)):
-            self.imt.set_leaf(pos, self._imt_value(self.imt_layout[pos]))
+            self.imt.set_leaf(pos, self._imt_value(self.imt_layout[pos]), self._undo)
         for pos in appended:
-            if not self.imt.try_append(self._imt_value(self.imt_layout[pos])):
-                self.imt = MerkleTree([self._imt_value(h) for h in self.imt_layout])   # capacity doubled
+            if not self.imt.try_append(self._imt_value(self.imt_layout[pos]), self._undo):
+                self._attr(self, "imt", MerkleTree([self._imt_value(h) for h in self.imt_layout]))   # capacity doubled
                 break
 
     def _reset_dirty(self):
