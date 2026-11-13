@@ -16,10 +16,11 @@ selftest ผ่าน 18/18
 | 1 Setup | `PK = {g, h=g^β, f, e(g,g)^α}`, `MK = (β, g^α)` | BSW07 ของ Charm (paper พิมพ์ `f = g^β` ผิด ที่ถูกคือ `g^{1/β}`) |
 | 2 KeyGen | `D = g^{(α+r)/β}`, `D_j = g^r·H(j)^{r_j}`, `D'_j = g^{r_j}`; คู่คีย์ DO และ Cloud Proxy; `PRE_{A→B} = PK_B^{x_A}` | ตรงทุกตัว |
 | 3 Encrypt + Index | `C_i = AES(SymK, D_i)`, `CT_key = CP-ABE(SymK, P)`, `I(w) = PRF(SymK, w)` → `Enc(id)`, BPL, Merkle root ของ index | ตรง (CP-ABE ห่อ SymK แบบ hybrid เพราะ BSW07 เข้ารหัสได้แค่ค่าใน GT) |
-| 4 Trapdoor | `3T_E + T_P` ไม่ขึ้นกับจำนวน keyword + signature + ZKP | exp 3 ครั้ง + pairing 1 ครั้ง; เวลาคงที่ตาม k_Q เหมือน Fig. 3 |
+| 4 Trapdoor | `3T_E + T_P` ไม่ขึ้นกับจำนวน keyword + signature + ZKP | exp 3 ครั้ง + pairing 1 ครั้ง (ฝั่ง DU เท่านั้น); เวลาคงที่ตาม k_Q เหมือน Fig. 3 |
+| 4 Proxy admission (Step 2) | ตรวจ signature + ZKP ไม่มี pairing | ตรวจ signature + ZKP; ไม่มี pairing ฝั่ง proxy (เคยมีการตรวจ `bind` ด้วย pairing ซึ่งไม่อยู่ใน paper ถูกเอาออกแล้ว) |
 | 4 Algorithm 1 (PRE) | `C3' = g^ReKey × C3` | ทำตามตัวอักษร |
 | 5 Algorithm 2 | ดึง BPL → ConvertToBitwise → Eval AND/OR/NOT → ดึง ciphertext → log | ตรงทีละบรรทัด (comment อ้างเลขบรรทัด) |
-| 6 Verify | Merkle path เทียบ root บน chain, ระบุไฟล์ที่ถูกแก้, incremental update | ตรง (selftest `t_tamper_detected`, `t_incremental_merkle`) |
+| 6 Verify | Merkle path ทีละไฟล์เทียบ root บน chain, ระบุไฟล์ที่ถูกแก้, incremental update | ตรง (selftest `t_tamper_detected`, `t_incremental_merkle`); ค่าเริ่มต้น `--proof-mode paths` = แบบใน paper ส่วน `multi` (multiproof) เป็น optimization ที่ไม่อยู่ใน paper ใช้เมื่อสั่งเท่านั้น |
 | 7 Decrypt | CP-ABE → SymK → AES | ตรง |
 | 8 Revocation | `RT_k = H(DU ‖ T ‖ Domain)`, Bloom filter แล้วค่อยถาม smart contract, lazy re-encryption, อัปเดตคีย์ของ attribute ที่โดน | ตรง (selftest `t_revocation`) |
 
@@ -37,6 +38,7 @@ selftest ผ่าน 18/18
 | Blockchain | Ganache + Solidity + Web3.py | ledger จำลองแบบ hash-chained ใน Python |
 | Pairing group | ไม่ระบุ | Charm SS512 |
 | N ใหญ่ | ไม่ได้ทดลองเกิน 10,000 ไฟล์ | keyword ที่ df < N/64 เก็บเป็น posting แล้วแปลงเป็น BPL ตอน query (ConvertToBitwise) |
+| ต้นทุน verify (Table 4) | `E + P_e + f_ct·H` แต่ไม่อธิบายว่า "ZKP over (T'q, R)" ทำอะไร | Merkle + Schnorr (2E) ไม่เติม pairing ที่ไม่มีหน้าที่ → verify ที่ implement เป็น lower bound ของ Table 4 (ต้องเขียนหมายเหตุใน paper AMTP) |
 | Keyword หลายคำ | ไม่มี (keyword เป็นคำเดี่ยว) | คำที่ติดกันใน query โดยไม่มี operator คั่น = keyword เดียว (dataset-v3 เป็นวลี RAKE) |
 
 ## 3. เรื่องที่สำคัญกับ paper AMTP
@@ -50,7 +52,15 @@ DU จะไม่รู้ โค้ดทำตามกลไกจริง 
 ### 3.2 ต้นทุนใน Table IV ของ AMTP
 Table IV เขียนต้นทุน verification ของ SE-COLLAB เป็น `T_E + T_P + t_leaf T_H` ตาม paper ต้นฉบับ
 แต่ที่ implement จริงคือ `2T_E + t_leaf T_H` (ไม่มี pairing เพราะ "ZKP over (T'q, R)" ไม่มีรายละเอียด)
-ควรแก้ตารางให้ตรง หรือเขียนหมายเหตุไว้
+ควรแก้ตารางให้ตรง หรือเขียนหมายเหตุไว้ เช่น "Table 4 of [37] lists E + P_e + f_ct·H for verification but does
+not specify the result ZKP; our implementation uses a Schnorr proof (2E), so its verification cost is a lower bound."
+
+### 3.2.1 การแก้ให้ตรง paper (ต้องรัน SE-COLLAB ใหม่ทุก suite)
+- เอาการตรวจ `bind` ด้วย pairing ฝั่ง proxy ออก (paper ไม่มี) → `server_total` ลดลง
+- ค่าเริ่มต้น `--proof-mode` เปลี่ยนจาก `multi` เป็น `paths` (ตาม Phase 6) → verify ช้าลงและ proof ใหญ่ขึ้นเมื่อผลลัพธ์มาก
+- ผลที่วัดก่อนการแก้นี้ (multiproof, มี pairing ฝั่ง proxy) ใช้ไม่ได้แล้ว
+- ช่อง completeness ของ SE-COLLAB ในตาราง AMTP: เขียนว่า "ตาม implementation ของ Phase 6" ไม่ใช่ "paper ไม่รองรับ"
+  (Section V-B ของ [37] อ้างว่าตรวจได้ แต่กลไก Phase 6 ไม่ตรวจ)
 
 ### 3.3 ตัวเลขต้องบอกให้ชัดว่าวัดช่วงไหน
 ผลบน dataset-v3, k_Q = 4, query แบบ AND (median ของ 30 รอบ, ms, เครื่องทดสอบ):

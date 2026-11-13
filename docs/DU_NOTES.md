@@ -35,8 +35,8 @@ Algorithm 1–4 จุดที่ paper เขียนผิดหรือไ
 | ความยาว R | HMAC 32 byte แต่ `ID = HMAC ‖ fid` ยาวกว่า XOR ตรง ๆ ไม่ได้ | `[ASSUMPTION]` ขยาย R เป็น `R ‖ H(R)` แล้วตัด |
 | Cipher | ไม่ระบุ | AES-CTR (ความยาว ciphertext = plaintext จำเป็นสำหรับ RS) |
 | PRF ของ remapping | `h(u.e, x)` ไม่ระบุ | AES_{u.e}(x) (เร็วพอสำหรับ remap ล้านบิต) |
-| ความยาว d | สูตร `−r·c·n'/ln(1 − p^{1/r})` ใน IV-B-5 (คูณ c = 0.1 จะทำให้ filter สั้นลง ไม่น่าใช่) | `[ASSUMPTION]` `d = r·(1+c)·z_max / −ln(1 − p^{1/r})` (นับ random insertion เป็น keyword เพิ่ม), p = 10⁻⁶ |
-| BF tree | มีแบบ basic (Fig. 3a) และ optimized (Fig. 3b) | ใช้แบบ basic (ทุก node ยาว d) — optimized ลดแค่ storage ไม่เปลี่ยนการค้น |
+| ความยาว BF | สูตร `−r·c·n'/ln(1 − p^{1/r})` ใน IV-B-5 โดย n' = element ของ node (คูณ c = 0.1 จะทำให้ filter สั้นลง ไม่น่าใช่) | `[ASSUMPTION]` ใช้ `r·(1+c)·n' / −ln(1 − p^{1/r})` (นับ random insertion เป็น keyword เพิ่ม), p = 10⁻⁶ |
+| BF tree | มีแบบ basic (Fig. 3a: ทุก node ยาวเท่าที่ root ต้องใช้) และ optimized (Fig. 3b: แต่ละ node ยาวตาม element ของตัวเอง) และบอกว่าหลัง optimize *"both leaf and nonleaf nodes become shorter"* | ใช้แบบ **optimized**: trapdoor และ BF_org อยู่ใน space ขนาด d ของ root (n' = keyword ไม่ซ้ำทั้งหมด) แล้ว remap แต่ละ node ลง BF ยาว `d_u` ของตัวเอง ทุก node มี false positive ≈ p BF_org ของ leaf เก็บเป็นรายการตำแหน่งที่เป็น 1 (ใช้ใน `u.E` และ `M = C ‖ BF_i` ของ Alg. 3) `[ASSUMPTION]` เพราะ bit array ยาว d ต่อ leaf ใช้ RAM ไม่ไหว |
 | Irrelevant result | ให้ "matching ตอน filtering" แต่ cloud ซื่อสัตย์ก็มี remapping collision ได้ | กรองทิ้งแทนการกล่าวหา cloud (PR #4) |
 | Domain | Du เป็น multi-cloud ไม่มีแนวคิด domain | เอกสาร N ไฟล์ของทุก domain รวมเป็นชุดเดียว แล้วกระจาย slice ไป n_c cloud (ค่าเริ่มต้น 5, t = 3) |
 
@@ -48,9 +48,26 @@ IV-B-6 นิยามจากชุด keyword W_q อยู่แล้ว �
 ใน paper ของเราควรเขียนว่า "Du รองรับ AND ผ่าน Bloom-filter trapdoor ของ W_q" และต้นทุน query generation
 ใน Table IV ควรเป็น `r·k_Q·T_H` (paper เขียน `r·T_H` สำหรับ keyword เดียว) คอลัมน์ `hash_qgen` ใน CSV = r·k_Q
 
-### 3.2 Du ช้าเพราะ design ของ paper เอง
-Bloom filter tree แบบ basic ใช้ความยาว d เดียวกันทุก node (d ถูกเลือกให้พอดีกับ leaf ที่มี keyword ≤ 10 คำ)
-node ด้านบนที่รวม keyword ของเอกสารจำนวนมากจึงเกือบเต็มไปด้วย 1 และตัดกิ่งได้น้อย จำนวน node ที่เดินผ่านจึงโตตาม N:
+### 3.2 แก้แล้ว: เดิม Du ช้าเพราะความยาว Bloom filter ไม่ตรง paper (ไม่ใช่ design ของ paper)
+**ข้อความเดิมในหัวข้อนี้ ("Du ช้าเพราะ design ของ paper เอง") ผิด** โค้ดเดิมใช้ basic tree ที่ทุก node ยาวเท่า leaf
+(คำนวณจาก z_max) ซึ่งไม่ตรงทั้ง Fig. 3(a) (basic tree ต้องยาวเท่าที่ root ต้องใช้) และ Fig. 3(b)
+node ระดับบนจึงเต็มไปด้วย 1 และตัดกิ่งไม่ได้ ตอนนี้ใช้ optimized tree ตาม IV-B-5 แล้ว (ดูตาราง ข้อ 2)
+
+ผลวัดบนเครื่องทดสอบ (dataset-v4 domain D1, n = 5 cloud, median 5 รอบ, ms; ต้องรันใหม่บนเครื่องที่ใช้รายงาน):
+
+| N | query | node ที่เดินต่อ cloud ก่อน → หลัง | server_total ก่อน → หลัง |
+|---|---|---|---|
+| 10,000 | keyword เดียว df = 3 | 2,814 → 75 | 29.1 → 0.72 |
+| 10,000 | keyword เดียว df = 568 | 6,112 → 5,061 | 77.7 → 54.2 |
+| 10,000 | AND คำที่พบบ่อย 2 คำ (ผล 46) | 3,369 → 2,073 | 88.0 → 48.5 |
+| 10,000 | AND คำที่พบบ่อย + คำหายาก (ผล 3) | 2,578 → 113 | 70.4 → 2.25 |
+| 50,000 | keyword เดียว df = 3 | – → 83 | – → 0.53 |
+
+หลังแก้ งานค้นโตตาม `|R| × log N` ไม่ใช่ N ผลทุก query ยังตรง ground truth (missed = 0, fp = 0)
+ส่วนที่แลกมา: setup และ storage ใหญ่ขึ้น (N = 10k: 41.6 → 134 MB รวม 5 cloud, setup 24 → 40 s;
+N = 50k: 744 MB, setup 148 s, RAM สูงสุด ≈ 2.8 GB) — ที่ 125k ต่อ domain หรือ 500k รวม ต้องเช็ค RAM ของเครื่องก่อน
+
+ตารางด้านล่างเป็นผล**ก่อนแก้** (ใช้ไม่ได้แล้ว เก็บไว้เทียบ):
 
 | N | node ที่เดินผ่าน (รวม 5 cloud) | server_total (cloud ที่ช้าสุด) | server_sum (งานรวม) | verify_total | du_decrypt | end_to_end |
 |---|---|---|---|---|---|---|
