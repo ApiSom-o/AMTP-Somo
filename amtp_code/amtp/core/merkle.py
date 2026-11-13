@@ -82,22 +82,71 @@ def multiverify(root: bytes, n: int, leaves: dict, proof: list) -> bool:
     n leaves whose root is `root`. Positions must be real (0 <= pos < n)."""
     if not leaves or any(not (0 <= i < n) for i in leaves):
         return False
-    known = {i: leaf_hash(v) for i, v in leaves.items()}
-    remaining = list(proof)
-    size = _size(n)
+    return root_from_proof(_size(n), {i: leaf_hash(v) for i, v in leaves.items()}, proof) == root
+
+
+def root_from_proof(size: int, known: dict, proof: list):
+    """Root of a padded tree of `size` leaves (a power of two) from known leaf HASHES
+    {position: hash} and the sibling hashes of MerkleTree.multiproof(sorted(known)).
+    None if the proof does not have exactly the expected shape. Known positions may lie in
+    the padding (their hash is then PAD), which lets an updater replay appends."""
+    if not known or any(not (0 <= i < size) for i in known):
+        return None
+    known = dict(known)
+    remaining, k = list(proof), 0
     while size > 1:
-        parents = sorted({i // 2 for i in known})
         nxt = {}
-        for p in parents:
+        for p in sorted({i // 2 for i in known}):
             pair = []
             for child in (2 * p, 2 * p + 1):
                 if child in known:
                     pair.append(known[child])
-                elif remaining:
-                    pair.append(remaining.pop(0))
+                elif k < len(remaining):
+                    pair.append(remaining[k])
+                    k += 1
                 else:
-                    return False
+                    return None
             nxt[p] = node_hash(pair[0], pair[1])
         known = nxt
         size //= 2
-    return not remaining and known.get(0) == root
+    return known.get(0) if k == len(remaining) else None
+
+
+def pad_root(size: int) -> bytes:
+    """Root of a subtree of `size` padding leaves."""
+    h = PAD
+    while size > 1:
+        h = node_hash(h, h)
+        size //= 2
+    return h
+
+
+def sparse_root(size: int, known: dict) -> bytes:
+    """Root of a subtree of `size` leaves where only `known` {position: leaf hash} are set
+    and every other leaf is padding."""
+    if not known:
+        return pad_root(size)
+    if size == 1:
+        return known[0]
+    half = size // 2
+    return node_hash(sparse_root(half, {i: h for i, h in known.items() if i < half}),
+                     sparse_root(half, {i - half: h for i, h in known.items() if i >= half}))
+
+
+def grown_root(old_size: int, left_root: bytes, new_size: int, appended: dict) -> bytes:
+    """Root after a tree of old_size leaves (root left_root) grows to new_size by doubling;
+    appended {position >= old_size: leaf hash} are the only real leaves beyond old_size."""
+    root, size = left_root, old_size
+    while size < new_size:
+        root = node_hash(root, sparse_root(size, {i - size: h for i, h in appended.items()
+                                                  if size <= i < 2 * size}))
+        size *= 2
+    return root
+
+
+def root_of_leaf_hashes(hashes) -> bytes:
+    """Root of a tree whose leaf hashes are given (padding added as MerkleTree does)."""
+    return sparse_root(_size(len(hashes)), dict(enumerate(hashes)))
+
+
+tree_size = _size

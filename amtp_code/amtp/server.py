@@ -8,8 +8,10 @@ import copy
 import time
 
 from .core import boolean
-from .core.crypto import hmac_ok
+from .core.crypto import hmac_ok, sig_ok
 from .dht import DHT, StorageError
+from .engine import Engine
+from .update import delta, enc_aff, request_digest
 from .core.hashing import H, TAG_QUERY, enc_bq
 from .index import EMPTY_SLOT, SENTINEL_LO
 from .core.merkle import MerkleTree
@@ -62,6 +64,80 @@ class CloudServer:
         self.dht = DHT()
         self.used_nonces = set()
         self.last_response = {}   # domain -> last honest response (for the replay scenario)
+        self.engines = {}         # domain -> Engine (the CS's working index)
+        self.owner_keys = {}      # domain -> public keys allowed to sign U_op
+        self.docs = {}            # domain -> Doc_i (id -> cid), finalized
+        self.request_nonces = set()
+        self._pending = {}        # domain -> candidate awaiting validation and anchoring
+
+    # ----- Phase 2: update protocol (CS side) -----
+    def create_domain(self, domain, policy, owner_keys, ops_per_epoch=1):
+        """Set up the domain's index; returns the genesis PIDs (public setup data for R^(0))."""
+        eng = Engine(domain, policy, ops_per_epoch)
+        self.engines[domain] = eng
+        self.owner_keys[domain] = list(owner_keys)
+        self.docs[domain] = {}
+        self.store_state(eng.snapshot())
+        return sorted(eng.parts)
+
+    def prepare_update(self, domain, requests) -> dict:
+        """Admit up to b signed requests, apply them, adapt and repair, and return the candidate
+        transition: roots, placements, Aff_i, Δ_i and the evidence π^upd for the validating owner."""
+        eng = self.engines[domain]
+        if domain in self._pending:
+            raise ValueError("a candidate for this domain is still awaiting validation")
+        if not requests or len(requests) > eng.ops_per_epoch:
+            raise ValueError(f"an epoch takes 1..{eng.ops_per_epoch} requests")
+        r_old, r_part_old, r_idx_old = eng.R_D, eng.part_tree.root, eng.imt.root
+        docs, seen, placements, deletes = dict(self.docs[domain]), set(), [], []
+        for req in requests:
+            u, sig = req["U"], req["sig"]
+            if not any(sig_ok(k, request_digest(u), sig) for k in self.owner_keys[domain]):
+                raise ValueError("σ_op invalid")
+            if u["domain"] != domain or u["epoch"] != eng.epoch:
+                raise ValueError("request is not for the current finalized epoch")
+            if u["nonce"] in self.request_nonces or u["nonce"] in seen:
+                raise ValueError("request nonce already used")
+            seen.add(u["nonce"])
+            if u["op"] == "insert":
+                cid = H(u["ct"])
+                if docs.get(u["id"]) is not None or cid in eng.loc:
+                    raise ValueError("identifier or ciphertext already live")
+                self.dht.put(cid, u["ct"])
+                placements.append(list(eng.insert(cid, {H(c) for c in u["C"]}, u["bucket"])))
+                docs[u["id"]] = cid
+            else:
+                cid = u["cid"]
+                if docs.get(u["id"]) != cid:
+                    raise ValueError("delete of a document that is not live")
+                eng.delete(cid)
+                placements.append(None)
+                deletes.append(cid)
+                docs[u["id"]] = None
+        st = eng.commit(evidence=True)
+        pi = dict(st["pi"], R_part_old=r_part_old, R_idx_old=r_idx_old)
+        d = delta(domain, eng.epoch, requests, enc_aff(st["aff"]), r_old, eng.R_D)
+        proposal = {"domain": domain, "epoch_old": eng.epoch - 1, "epoch_new": eng.epoch,
+                    "R_old": r_old, "R_new": eng.R_D, "placements": placements,
+                    "aff": st["aff"], "delta": d, "pi": pi, "stats": {k: v for k, v in st.items()
+                                                                       if k not in ("aff", "pi")}}
+        self._pending[domain] = (docs, deletes, seen)
+        return proposal
+
+    def finalize_update(self, domain):
+        """After the Root Anchor accepted the transition: expose the successor snapshot and drop
+        the ciphertexts of deleted documents (only now, as Phase 2 requires)."""
+        docs, deletes, seen = self._pending.pop(domain)
+        self.docs[domain] = {i: c for i, c in docs.items() if c is not None}
+        self.request_nonces |= seen
+        for cid in deletes:
+            self.dht.delete(cid)
+        eng = self.engines[domain]
+        state = eng.snapshot()
+        if state.R_D != eng.R_D:
+            raise RuntimeError("incremental R_D differs from the full rebuild")
+        self.store_state(state)
+        return state
 
     # ----- storage (called by the Data Owner) -----
     def store_ciphertext(self, cid, ct):

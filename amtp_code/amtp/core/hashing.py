@@ -54,6 +54,10 @@ TAG_POSTING = b"AMTP/posting/v1"      # L_{w,j} inside γ
 TAG_QUERY = b"AMTP/query/v1"          # message under τ_Q
 TAG_TRANSITION = b"AMTP/transition/v1"   # message signed by the owner for a root transition
 TAG_BQ = b"AMTP/bq/v1"                # canonical Boolean expression B_Q
+TAG_REQUEST = b"AMTP/request/v1"      # signed insert / delete request U_op
+TAG_REQUESTS = b"AMTP/requests/v1"    # the batch of requests of one epoch
+TAG_AFF = b"AMTP/aff/v1"              # affected-state descriptor Aff_i
+TAG_DELTA = b"AMTP/delta/v1"          # AUDC Δ_i
 CID_LEN = 32
 
 

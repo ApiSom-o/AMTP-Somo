@@ -19,16 +19,22 @@ import time
 from collections import Counter
 
 from .bptree import BPlusTree
-from .core.hashing import H, HashCounter
+from .core.hashing import H, HashCounter, enc_posting
 from .cuckoo import CuckooFilter
 from .index import (EMPTY_SLOT, IMT_EMPTY, SENTINEL_LO, ZERO, DomainState, Partition,
                     domain_root, gamma, imt_leaf, imt_next, rho, sorted_imt_layout)
-from .core.merkle import MerkleTree
+from .update import aff_records
+from .core.merkle import MerkleTree, tree_size
 
 
 class Engine:
-    def __init__(self, domain: str, policy):
+    def __init__(self, domain: str, policy, ops_per_epoch: int = 1):
+        """ops_per_epoch = b: the Cloud Server applies b logical operations, then commits them
+        as one epoch (one candidate root, one validation, one anchor). b = 1 by default."""
+        if ops_per_epoch < 1:
+            raise ValueError("ops_per_epoch must be at least 1")
         self.domain, self.policy = domain, policy
+        self.ops_per_epoch = ops_per_epoch
         self.epoch = 0
         self._pid_counter = 0
         self.parts, self.trees = {}, {}       # pid -> Partition / slot MerkleTree
@@ -49,7 +55,12 @@ class Engine:
         self.R_D = domain_root(domain, 0, self.part_tree.root, self.imt.root)
 
     # ------------------------------------------------------------ updates
+    @property
+    def batch_full(self) -> bool:
+        return self.pending_ops >= self.ops_per_epoch
+
     def insert(self, cid: bytes, keys, bucket: int):
+        """Place cid; returns its location (PID, ℓ)."""
         if cid in self.loc:
             raise ValueError("cid already live")
         self.fwd[cid] = frozenset(keys)
@@ -67,9 +78,14 @@ class Engine:
         self.live[pid] += 1
         self._attach(cid, pid, slot)
         self._touch(pid)
+        self._ops.append(("insert", cid, pid, slot))
+        self.pending_ops += 1
+        return pid, slot
 
     def delete(self, cid: bytes):
         pid, slot = self.loc[cid]
+        self._ops.append(("delete", cid, pid, slot))
+        self.pending_ops += 1
         self.parts[pid].slots[slot] = EMPTY_SLOT              # tombstone ⊥
         self.trees[pid].set_leaf(slot, EMPTY_SLOT)
         self.free[pid].append(slot)
@@ -79,21 +95,33 @@ class Engine:
         del self.fwd[cid]
         self._touch(pid)
 
-    def commit(self) -> dict:
-        """Adapt (policy), repair commitments, advance the epoch. Returns cost stats."""
+    def commit(self, evidence: bool = False) -> dict:
+        """Adapt (policy), repair commitments, advance the epoch. Returns cost stats.
+        evidence=True also returns the candidate's Aff_i records ("aff") and the update evidence
+        π^upd ("pi") a validating Data Owner needs to check the transition against the old root."""
         t0 = time.perf_counter()
         c0, b0 = HashCounter.snapshot()
         touched = sorted((self._modified | self._new) & self.parts.keys())
         splits, merges = self.policy.adapt(self, touched)
 
+        parts_changed = {}
         for pid in self._modified & self.parts.keys():
             if pid in self._new:
                 continue
+            v_old = self.parts[pid].v
             if self.policy.versioned:
                 self.parts[pid].v += 1
                 for h in self.keys_in[pid]:
                     self._dirty_comp.add((h, pid))
+            parts_changed[pid] = (v_old, self.parts[pid].v)
         n_parts_changed = len(self._modified | self._new)
+        aff = pi = None
+        if evidence:
+            moves = {c: (a, self.loc[c]) for c, a in self._start_loc.items()
+                     if c in self.loc and self.loc[c] != a}
+            aff = aff_records(self._ops, self._structs, moves, parts_changed,
+                              {p: self.parts[p].v for p in self._new}, dict(self._retired_v))
+            pi = self._evidence()
 
         if self._new or self._retired:
             self._rebuild_part_tree()
@@ -137,7 +165,10 @@ class Engine:
             "partitions_changed": n_parts_changed,
             "posting_components_refreshed": len(self._dirty_comp),
             "keys_refreshed": len(self._dirty_keys),
+            "ops": len(self._ops),
         }
+        if evidence:
+            stats.update(aff=aff, pi=pi, R_part=self.part_tree.root, R_idx=self.imt.root)
         self._reset_dirty()
         return stats
 
@@ -150,8 +181,10 @@ class Engine:
         entries, lineage = self.live_entries(pid), self.lineage[pid]
         half = len(entries) // 2
         self._retire(pid)
-        return [self._new_partition(entries[:half], lineage),
-                self._new_partition(entries[half:], lineage)]
+        left = self._new_partition(entries[:half], lineage)
+        right = self._new_partition(entries[half:], lineage)
+        self._structs.append(("split", pid, left, right))
+        return [left, right]
 
     def merge(self, a, b):
         """Concatenate live entries in increasing source-PID order into a fresh partition."""
@@ -160,7 +193,9 @@ class Engine:
         lineage = self.lineage[first] | self.lineage[second]
         self._retire(first)
         self._retire(second)
-        return self._new_partition(entries, lineage)
+        m = self._new_partition(entries, lineage)
+        self._structs.append(("merge", a, b, m))
+        return m
 
     # -------------------------------------------------------------- views
     def snapshot(self) -> DomainState:
@@ -192,9 +227,11 @@ class Engine:
 
     def _retire(self, pid):
         for cid in self.live_entries(pid):
+            self._start_loc.setdefault(cid, self.loc[cid])      # first location in this batch
             self._detach(cid, pid)
         for b in self.lineage[pid]:
             self.by_bucket[b].discard(pid)
+        self._v_of_retired[pid] = self.parts[pid].v
         for d in (self.parts, self.trees, self.lineage, self.live, self.free, self.keys_in):
             del d[pid]
         self._modified.discard(pid)
@@ -202,6 +239,7 @@ class Engine:
             self._new.discard(pid)          # created and retired in the same batch
         else:
             self._retired.add(pid)
+            self._retired_v[pid] = self._v_of_retired.pop(pid)
 
     def _attach(self, cid, pid, slot):
         self.loc[cid] = (pid, slot)
@@ -308,3 +346,80 @@ class Engine:
     def _reset_dirty(self):
         self._modified, self._new, self._retired = set(), set(), set()
         self._dirty_comp, self._dirty_keys = set(), set()
+        self._ops, self._structs, self._start_loc = [], [], {}
+        self._retired_v, self._v_of_retired = {}, {}
+        self.pending_ops = 0
+
+    # ------------------------------------------------------------ update evidence π^upd
+    def _evidence(self) -> dict:
+        """π^upd against the predecessor commitments. Called inside commit after placement,
+        adaptation and version changes, before any tree is repaired, so self.part_tree,
+        self.post, self.gam, self.rho and the IMT still hold the predecessor state."""
+        n_parts_old = len(self.part_pos)
+        if self._new or self._retired:
+            part = {"mode": "full", "leaf_hashes": list(self.part_tree.levels[0][:n_parts_old])}
+        else:
+            positions = sorted(self.part_pos[p] for p in self._modified & self.parts.keys())
+            part = {"mode": "path", "proof": self.part_tree.multiproof(positions) if positions else []}
+
+        dirty = {}
+        for h, pid in self._dirty_comp:
+            dirty.setdefault(h, set()).add(pid)
+        keys, added, removed = {}, [], []
+        for h, pids in dirty.items():
+            new_sel = {p for p, e in (self.comp.get(h) or {}).items() if e}
+            if h not in self.rho:
+                if new_sel:
+                    added.append(h)
+                    keys[h] = {"new": True}
+                continue
+            order, tree = self.post[h]
+            aff_old = {p: order[p] for p in pids if p in order}
+            if not aff_old and not (new_sel & pids):
+                continue                # only a partition created and retired in this batch: unchanged
+            ent = {"pos": self.imt_pos[h], "next": self.imt_nxt[h], "n_sel": len(order),
+                   "positions": aff_old}
+            if new_sel == set(order):
+                ent.update(mode="path", proof=tree.multiproof(sorted(aff_old.values())))
+            else:
+                old_list = sorted(order, key=order.get)
+                ins, pre = {}, {}
+                for n in sorted(new_sel - set(order)):
+                    k = bisect.bisect_left(old_list, n)
+                    ins[n] = k
+                    for j in (k - 1, k):
+                        if 0 <= j < len(old_list) and old_list[j] not in pids and j not in pre:
+                            p = old_list[j]
+                            comp = sorted(self.comp[h][p].items(), key=lambda e: e[1])
+                            pre[j] = (p, self.parts[p].v, H(enc_posting(comp)))
+                ent.update(mode="list", gammas=[self.gam[h][p] for p in old_list], ins=ins, pre=pre)
+            if not new_sel:
+                removed.append(h)
+            keys[h] = ent
+
+        neighbours = {}
+        for h in added + removed:
+            k = bisect.bisect_left(self.imt_sorted, h)
+            lo = self.imt_sorted[k - 1] if k else SENTINEL_LO
+            if lo not in keys:
+                neighbours[lo] = {"rho": self.rho.get(lo, ZERO), "next": self.imt_nxt[lo],
+                                  "pos": self.imt_pos[lo]}
+        free, old_free = list(self.imt_free), set(self.imt_free)
+        for h in sorted(removed):
+            free.append(self.imt_pos[h])
+        n = n_old = len(self.imt_layout)
+        free_used, appended = [], []
+        for h in sorted(added):
+            if free:
+                p = free.pop()
+                if p in old_free:
+                    free_used.append(p)
+            else:
+                p, n = n, n + 1
+                appended.append(p)
+            keys[h]["pos_new"] = p
+        size_old = tree_size(n_old)
+        positions = ({e["pos"] for e in keys.values() if "pos" in e} | {e["pos"] for e in neighbours.values()}
+                     | set(free_used) | {p for p in appended if p < size_old})
+        return {"part": part, "keys": keys, "neighbours": neighbours, "free_used": sorted(free_used),
+                "imt_n_old": n_old, "imt_proof": self.imt.multiproof(sorted(positions)) if positions else []}

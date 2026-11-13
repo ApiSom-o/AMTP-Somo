@@ -129,10 +129,10 @@ class Domain:
     def __init__(self, name, corpus, docs, a, anchor, server, policy=None, extra_words=None):
         self.name, self.corpus = name, corpus
         self.signer = Signer()
-        anchor.register_domain(name, self.signer.public)
         server.register_query_key(name, corpus.keys_for(name).k_a)
         self.anchor, self.server = anchor, server
         self.eng = Engine(name, policy or AdaptivePolicy(a.buckets, a.theta_min, a.theta_max))
+        anchor.register_domain(name, self.signer.public, self.eng.R_D)      # R^(0)
         self.cids = []
         for i, d in enumerate(docs):
             cid, ct, keys, bucket = corpus.encrypt(d, name)

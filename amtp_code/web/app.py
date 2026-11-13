@@ -96,9 +96,9 @@ def _search_one(user, domain, text, mode):
 def publish():
     d = request.get_json(force=True)["domain"]
     with _lock:
-        before = len(world.owners[d].layout.log)
+        before = len(world.owners[d].structure_log)
         doc = world.publish_next(d)
-        splits = world.owners[d].layout.log[before:]
+        splits = [f"{r[0]} {r[1][:8]}" for r in world.owners[d].structure_log[before:]]
         return jsonify({"published": doc and doc["title"], "splits": splits, "state": _state()})
 
 

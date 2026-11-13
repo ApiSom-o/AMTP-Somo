@@ -119,9 +119,11 @@ def test_split_keeps_threshold_rule():
     w = World()
     for _ in range(3):
         w.publish_next("A")
-    layout = w.owners["A"].layout
-    assert all(p.count <= layout.theta_max for p in layout.partitions)
-    assert 0 < layout.theta_min and 2 * layout.theta_min < layout.theta_max
+    owner = w.owners["A"]
+    pol = owner.policy
+    assert all(n <= pol.theta_max for n in owner.validator.live.values())
+    assert 0 < pol.theta_min and 2 * pol.theta_min < pol.theta_max
+    assert any(r[0] == "split" for r in owner.structure_log)       # the demo data does split
 
 
 def test_boolean_canonical_form():
