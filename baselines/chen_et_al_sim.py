@@ -38,12 +38,12 @@ Simulation ของ baseline Chen et al. [40]
      index เต็มของ Chen = keyword x gamma บิต (~32 GB) จึงสร้าง entry เฉพาะคำที่ทดลอง
      (bitmap ของคำนั้นครบทุกเอกสาร เวลาค้น/verify เท่าแบบเต็ม) ขนาด storage ยังรายงานของ index เต็ม
 
-Workload: dataset กลางของ AMTP (GitHub release dataset-v3, arXiv 4 domain) ผ่าน amtp_dataset.py
+Workload: dataset กลางของ AMTP (dataset-v4, arXiv 4 domain x 125,000 ไฟล์, ไฟล์ใน datasets/arxiv/data_v4/) ผ่าน amtp_dataset.py
   - N เอกสาร = N/4 ไฟล์แรกของแต่ละ domain (ไม่สุ่ม) -> ทุก scheme ได้เอกสารชุดเดียวกัน
   - keyword ใช้ที่สกัดไว้ใน documents.csv ตรง ๆ, exp3 ใช้เอกสารจริงจาก insert_pool
   - exp1 ตรวจผลทุก query กับ ground truth จาก plaintext index (ต้องตรงเป๊ะ)
 
-วิธีรัน (pip install cryptography, แตก dataset ไว้ที่ <repo>/data/amtp_file_db หรือใส่ --data):
+วิธีรัน (pip install cryptography, แตก dataset ด้วย datasets/arxiv/unpack.py ไว้ที่ <repo>/data/amtp_file_db_v4 หรือใส่ --data):
   python3 chen_et_al_sim.py demo                       # ทีละขั้น + จับ CS ที่โกง
   python3 chen_et_al_sim.py selftest                   # ทดสอบความถูกต้อง 12 ข้อ
   python3 chen_et_al_sim.py exp1                       # replay results/exp1_queries.json (default)
@@ -70,6 +70,9 @@ from collections import defaultdict               # dict ที่สร้า�
 from dataclasses import dataclass                 # โครงสร้างข้อมูลแบบสั้น
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # AES-GCM สำหรับ SE
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import wire_sizes as W                            # noqa: E402  กติกานับขนาดเดียวกันทุก scheme
 
 
 # ============================================================================
@@ -686,9 +689,20 @@ def dataset():
     return amtp_dataset                           # คืน module
 
 
+FILE_LEN = {}                                     # ตำแหน่งบิต -> ขนาด plaintext ของไฟล์ (ใช้นับ response_bytes)
+
+
 def to_chen(docs, start: int = 0):
     """แปลง Doc ของ dataset -> (ตำแหน่งบิต, set(keywords)) ที่ DataOwner ของ Chen ใช้
-    bitmap ต้องใช้เลข 0..gamma-1 แทน id เอกสาร จึงใช้ลำดับในรายการเป็นตำแหน่งบิต"""
+    bitmap ต้องใช้เลข 0..gamma-1 แทน id เอกสาร จึงใช้ลำดับในรายการเป็นตำแหน่งบิต
+    และจำขนาดไฟล์ของแต่ละตำแหน่งไว้ใน FILE_LEN: [40] คืนแค่ bitmap ไม่ได้คืนไฟล์ จึงคิดขนาด
+    ciphertext มาตรฐาน AES-GCM ของไฟล์ผลลัพธ์ตามกติกากลาง (wire_sizes.py)"""
+    root = dataset().load()["dir"] if docs and hasattr(docs[0], "file_path") else None
+    if start == 0:
+        FILE_LEN.clear()
+    for i, d in enumerate(docs):
+        if root is not None:
+            FILE_LEN[start + i] = os.path.getsize(os.path.join(root, d.file_path))
     return [(start + i, set(d.keywords)) for i, d in enumerate(docs)]  # keyword ไม่ซ้ำในไฟล์อยู่แล้ว
 
 
@@ -839,9 +853,11 @@ def run_query(du, cs, q):
                xor_search=c_s["xor"], visited=c_s["visited"], prf_verify=c_v["prf"], xor_verify=c_v["xor"])
     nbytes = cs.he.nbytes                         # ขนาด Sum_e 1 ก้อน
     info = dict(rQ=len(ids), pQ=sum(popcount(b) for b in bitmaps),  # จำนวนผลลัพธ์ / ผลรวม posting
-                proof_bytes=len(R) * PROOF_BYTES,  # ขนาด proof (32 byte ต่อ keyword)
+                proof_bytes=len(R) * W.HASH,      # ขนาด proof (vt 32 byte ต่อ keyword)
                 token_bytes=sum(t.size_bytes() for t in tokens),  # ขนาด token ที่ DU ส่ง
-                response_bytes=len(R) * (nbytes + PROOF_BYTES),  # ขนาด R ที่ CS ส่งกลับ
+                # response = (Sum_e + vt) ต่อ keyword + ไฟล์ผลลัพธ์ (id + ciphertext มาตรฐาน) ตาม wire_sizes.py
+                response_bytes=len(R) * (nbytes + W.HASH)
+                + sum(W.result_entry_bytes(W.std_ct_bytes(FILE_LEN.get(i, 0))) for i in ids),
                 ids=set(ids))                     # ผลลัพธ์ (ไว้เทียบกับ ground truth ไม่เขียนลง CSV)
     return times, ops, info                       # คืนผล
 
@@ -1353,7 +1369,7 @@ def main():
     ap.add_argument("mode", choices=["demo", "selftest", "exp1", "exp2", "exp3", "all",
                                      "search1", "verify1", "tamper"])  # โหมดที่จะรัน
     # ---- dataset กลาง (amtp_dataset.py) ----
-    ap.add_argument("--data", default=None, help="โฟลเดอร์ amtp_file_db (ค่าเริ่มต้น <repo>/data/amtp_file_db)")
+    ap.add_argument("--data", default=None, help="โฟลเดอร์ dataset (ค่าเริ่มต้น <repo>/data/amtp_file_db_v4 หรือ AMTP_DATA)")
     ap.add_argument("--domains", nargs="+", default=["D1", "D2", "D3", "D4"], help="domain ที่ใช้")
     ap.add_argument("--seed", type=int, default=42, help="seed ของการสร้าง query (เท่ากับ seed ของ dataset)")
     # ---- ชื่อและค่าเริ่มต้นเหมือนกันทุก baseline (du / se_collab / chen) ----

@@ -11,6 +11,11 @@ engines, one per function, removes duplicated code paths, and is the codebase fo
 |---|---|---|
 | 1 | Current AMTP code, cleaned; previous experiment results removed | Done |
 | 2 | Engine layout and one shared benchmark harness for AMTP and all baselines | Planned |
+
+Before stage 2, `amtp_code` was brought in line with the paper's protocol flow: binary encodings and
+`cid = H(CT bytes)`, B+ Search Tree and Cuckoo filter for lookup, the Phase 2 update protocol with the owner's
+Validator, one code path for demo and benchmarks (attacks in an adversary plug-in), and one binary size rule for
+every scheme. See `docs/ENGINE_REDESIGN.md` section 3.
 | 3 | Implementation-level performance fixes and multiprocessing | Planned |
 | 4 | Protocol revisions, after supervisor approval | Planned |
 

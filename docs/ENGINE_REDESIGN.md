@@ -46,37 +46,45 @@ These apply to every change, by anyone.
 ## 3. Where the code is now
 
 NewAMTP starts from AMTP `main` at commit `0edbce4` (stage 1), with previous results and the old
-dataset-v3 parts removed.
+dataset-v3 parts removed. The table describes the code after the paper-flow steps 1 to 8
+(Phase 5 evidence fix, CT bytes, binary encodings, B+ tree and Cuckoo filter, Phase 2 update
+protocol, single code path, benchmark size rule, docs).
 
 | Path | What it does today |
 |---|---|
-| `amtp_code/amtp/hashing.py` | `H(...)` (SHA-256 over length-prefixed parts), `enc()` canonical JSON, global `HashCounter` |
-| `amtp_code/amtp/merkle.py` | positional Merkle tree, `set_leaf`, `try_append`, `multiproof`, `multiverify` |
-| `amtp_code/amtp/crypto.py` | AES-GCM, AES-SIV, HMAC, Ed25519 (stand-in for ABS), policy key wrap (stand-in for CP-ABE) |
-| `amtp_code/amtp/boolean.py` | AND/OR parser and evaluator, used for queries and access policies |
-| `amtp_code/amtp/nlp.py` | RAKE keyword extraction (Phase 1, step 3) |
-| `amtp_code/amtp/dht.py` | ciphertext store: consistent-hash ring with replicas |
-| `amtp_code/amtp/engine.py` | **incremental** index: partitions, postings, γ, ρ, R^post, partition tree, indexed IMT, `commit()` |
+| `amtp_code/amtp/core/hashing.py` | `H(...)` over length-prefixed parts; tagged binary encodings `lp`, `enc_posting`, `enc_bq` and the `TAG_*` constants; `enc()` only for plaintext payloads; global `HashCounter` |
+| `amtp_code/amtp/core/merkle.py` | positional Merkle tree, `set_leaf`, `try_append`, `multiproof`, `multiverify`, `root_from_proof` (also used by the Validator) |
+| `amtp_code/amtp/core/crypto.py` | AES-GCM, AES-SIV, HMAC, Ed25519 (stand-in for ABS), policy key wrap (stand-in for CP-ABE), `make_ct` / `unpack_ct` (CT as raw bytes) |
+| `amtp_code/amtp/core/boolean.py` | AND/OR parser and evaluator, canonical B_Q (flatten, dedupe, absorption, sort) |
+| `amtp_code/amtp/nlp.py` | RAKE keyword extraction (Phase 1, step 3) and the single `norm` used at index and query time |
+| `amtp_code/amtp/dht.py` | ciphertext store of raw bytes: consistent-hash ring with replicas, `cid = H(CT bytes)`, `delete` |
+| `amtp_code/amtp/engine.py` | **incremental** index on the Cloud Server: partitions, postings (B+ tree), Cuckoo filter, γ, ρ, R^post, partition tree, indexed IMT; `ops_per_epoch` (b); `commit(evidence=True)` returns Aff and π^upd |
+| `amtp_code/amtp/bptree.py`, `cuckoo.py` | Search Tree (order 64) and Cuckoo filter: lookup only, never evidence |
 | `amtp_code/amtp/variants.py` | partition policies: AMTP (adaptive), Static-MT, Global-MT |
-| `amtp_code/amtp/index.py` | `DomainState` (**full rebuild** of every commitment), `PartitionLayout` (second, demo-only index builder), helpers `gamma`, `rho`, `imt_leaf` |
-| `amtp_code/amtp/owner.py` | demo Data Owner: encrypts and publishes through `PartitionLayout` + `DomainState` |
-| `amtp_code/amtp/anchor.py` | Root Anchor: signed transitions, `e' = e* + 1`, global root `R_G` |
-| `amtp_code/amtp/server.py` | Cloud Server: admission, **nine attack modes inline**, `build_response` (ASPA) |
+| `amtp_code/amtp/update.py` | Phase 2 encodings: signed request digest, Aff records, Δ, genesis root R^(0) |
+| `amtp_code/amtp/validator.py` | owner-side Validator (Phase 2, step 5): checks σ_op, replays the batch on dirty paths, recomputes R_D', Aff and Δ, signs σ_root |
+| `amtp_code/amtp/index.py` | `DomainState`, the per-epoch query snapshot built from `Engine.snapshot()` (full rebuild, checked against the incremental `R_D`); helpers `gamma`, `rho`, `imt_leaf`; `extract_keywords` (demo-only extractor) |
+| `amtp_code/amtp/owner.py` | Data Owner: encrypts, signs U_op, runs its Validator on the server's proposal, submits σ_root to the anchor |
+| `amtp_code/amtp/anchor.py` | Root Anchor: genesis root, signed transitions with Δ, `e' = e* + 1`, predecessor check, global root `R_G` |
+| `amtp_code/amtp/server.py` | honest Cloud Server only: `prepare_update` / `finalize_update`, admission, `lookup` (filter → tree), `build_response` (ASPA) |
+| `amtp_code/amtp/adversary.py` | adversary plug-in with the attack modes, wrapped around the honest server (demo and tests only) |
 | `amtp_code/amtp/user.py` | Data User: trapdoor, seven checks of Accept_Q, decryption |
-| `amtp_code/amtp/scenario.py`, `web/`, `run.py` | interactive demo |
+| `amtp_code/amtp/scenario.py`, `web/`, `run.py` | interactive demo (runs the same Engine, Validator and anchor as the benchmarks) |
 | `amtp_code/bench/experiments.py` | AMTP benchmark suites (legacy exp1/2/3/5/theta and the dataset-v4 suites), `run_xquery` (cross-domain), `tamper_response`, `full_check` |
 | `amtp_code/bench/ablation.py`, `workload.py`, `extraction.py`, `plot.py` | Exp. 4 ablation, workload loaders, keyword-extraction timing, plots |
 | `baselines/*_sim.py` | Chen et al., Du et al., SE-COLLAB, each with its own copy of the timing, CSV and query-replay code |
+| `baselines/wire_sizes.py` | the one binary size rule (proof_bytes, response_bytes) for every scheme |
 | `baselines/plot_*.py` | six plotting scripts |
 | `scripts/aws_run_all.sh` | runs the advisor's experiment plan on one machine |
 
 Known facts about the current code that the plan depends on:
 
-- **Two index builders.** The benchmarks use `Engine` (incremental). The demo uses `PartitionLayout` + `DomainState`, which follow different rules (version bumped per insert, no merge, emptiest partition across all buckets).
-- **Publishing rebuilds everything.** `Domain.publish_snapshot()` in `bench/experiments.py` calls `Engine.snapshot()`, which builds a full `DomainState` (every γ, ρ and Merkle tree) so that `build_response` has something to read.
+- **One index code path.** The demo, the tests and the benchmarks all run `Engine` through the Phase 2 protocol (`PartitionLayout` was removed).
+- **Publishing still rebuilds the query snapshot.** `CloudServer.finalize_update()` (and `Domain.publish_snapshot()` in `bench/experiments.py`) calls `Engine.snapshot()`, which builds a full `DomainState` (every γ, ρ and Merkle tree) so that `build_response` has something to read (B1). Update-only benchmarks skip it (`snapshot=False`).
 - **Cross-domain search exists at benchmark level only.** `run_xquery` sends one domain-bound query per domain, one after another, and verifies each against that domain's own root. There is no engine for it.
-- **Owner-side transition validation (Phase 2, step 5) is not implemented.**
-- **Legacy suites still use dataset-v3 workload files.** `exp1`, `exp2`, `exp5` and `theta` replay `baselines/results/exp1_queries.json`, `exp2_layouts.json` and `exp5_workload.json`, built from dataset-v3, whose parts are not in NewAMTP. The dataset-v4 suites (`search1`, `verify1`, `tamper`, `xsearch`, `xverify`, `xdomains`) do not need them.
+- **Owner-side transition validation (Phase 2, step 5) is implemented** (`validator.py`) and timed in Exp. 3 (`validate_ms`).
+- **A rejected candidate is rolled back.** `Engine.begin()` opens a working successor whose changes go to an undo log; `CloudServer.abort_update()` (called by `DataOwner.update` when the Validator or the Root Anchor rejects) runs `Engine.rollback()` and the domain can be updated again from the finalized predecessor. `finalize_update()` calls `Engine.accept()`.
+- **Shared workload files.** `exp1_queries.json` and `exp5_workload.json` (used by `exp1`, `exp5` and `theta`) are built on dataset-v4. `exp2_layouts.json` (used only by the legacy `exp2` / `exp2-layouts` suites, not by `scripts/aws_run_all.sh`) is still from dataset-v3 and must be regenerated with `python -m bench.experiments exp2-layouts` before `exp2` is used. The dataset-v4 suites (`search1`, `verify1`, `tamper`, `xsearch`, `xverify`, `xdomains`) do not need these files.
 
 ## 4. Target architecture
 
@@ -103,10 +111,15 @@ against the anchored old root before the owner signs, instead of rebuilding the 
 
 Two pieces sit outside the core:
 
-- **Adversary plug-in**: the nine attack modes from `server.py`, wrapped around an honest Proof engine's output. Demo and tests only; benchmarks never load it.
+- **Adversary plug-in** (`amtp/adversary.py`, done): the attack modes, wrapped around the honest server's output. Demo and tests only; benchmarks never load it.
 - **Shared harness**: dataset loading, query replay, timing (reps and warm-up), CSV writer, plots. Used by AMTP and every baseline.
 
 ### 4.2 Data flow
+
+**Epoch.** One epoch is one batch of `b` logical operations (`ops_per_epoch`, default `b = 1`): the
+Cloud Server applies the `b` signed requests, adapts and repairs once, and proposes one candidate
+root; the owner's Validator checks it once and signs one `σ_root`; the Root Anchor advances `e*` by
+one. `b` is a benchmark parameter and is recorded with every update result.
 
 Update path (owner and cloud, Phases 1 to 3, one epoch):
 
@@ -194,14 +207,14 @@ say the same thing.
 
 | ID | Change | Type |
 |---|---|---|
-| D1 | Remove the B+ tree and the Cuckoo filter from the indexing and query figures. Only the IMT is evidence; the server may use any lookup structure. | figure + text |
-| D2 | IMT leaf is `I_w = H(h_w ‖ ρ_w ‖ next(h_w))` (eq. 20). Non-membership is one bracketing leaf: `h_lo < h < next(h_lo)`. | paper behind code |
-| D3 | Commitment runs on the cloud server; the owner's Validator replays Δ on dirty paths at `O(|W_aff| · log n)` instead of re-deriving everything. | missing in code |
+| D1 | The code now has the B+ Search Tree and the Cuckoo filter as lookup structures only (`bptree.py`, `cuckoo.py`). The indexing and query figures may keep them, but must show that only the IMT is evidence. | figure + text |
+| D2 | IMT leaf is `I_w = H(h_w ‖ ρ_w ‖ next(h_w))` (eq. 20). Non-membership is one bracketing leaf: `h_lo < h < next(h_lo)`. | done in code; paper text in `IMT_UPDATE_COST.md` §6 |
+| D3 | Commitment runs on the cloud server; the owner's Validator replays Δ on dirty paths at `O(|W_aff| · log n)` instead of re-deriving everything. | done in code (`validator.py`) |
 | D4 | Draw Phases 2 and 3 as one pass: place → adapt → repair → one candidate root → one validation → one anchor (one epoch). | figure only |
 | D5 | Either state the real `W_aff` (with `v` inside γ, a version bump re-commits every keyword in the partition) or move `v` out of γ (= B4). | protocol change |
 | D6 | For AND queries, prove only partitions shared by every keyword's `Sel(h)` (= B3). | protocol change |
 | D7 | Accept_Q has seven terms: `b_ctx ∧ b_anchor ∧ b_idx ∧ b_papc ∧ b_part ∧ b_comp ∧ b_ct`. Cross-domain: the user reads each domain's `(e*, R_D)` from the anchor; `R_G` stays audit-only. | figure + text |
-| D8 | Phase 1 figure: show "W(d) given by the shared dataset" as an alternative to RAKE. Decide whether the signed update `σ_op` is checked (it is not, in code) or drop it from the figure. | figure + code |
+| D8 | Phase 1 figure: show "W(d) given by the shared dataset" as an alternative to RAKE. The signed update `σ_op` is checked by the Cloud Server and by the Validator. | figure only |
 
 The "commitment tree" in section 4.3 should replace the partition-only tree in the current figure.
 
@@ -218,14 +231,14 @@ Stage 2, in order (one pull request per step is fine):
 
 1. Create `amtp/core/` and move the primitives (`hashing`, `merkle`, `crypto`, `boolean`) without changing them.
 2. Move `DomainState` into `tests/oracle.py`. Keep a test that compares the incremental `R_D` with the oracle.
-3. Point the demo at `Engine`; delete `PartitionLayout` and the `DataOwner` publish path. Replace `index.extract_keywords` with `nlp.py`.
+3. Point the demo at `Engine`; delete `PartitionLayout` and the `DataOwner` publish path (**done**). Replace `index.extract_keywords` with `nlp.py` (open: the demo still uses it when a document has no W(d)).
 4. Split `engine.py` into the Partition and Commitment engines, with `variants.py` as Partition's policy.
-5. Split `server.py` into Query (admission) and Proof (`build_response`); move the nine attacks into `plugins/adversary.py`.
+5. Split `server.py` into Query (admission) and Proof (`build_response`) (open); move the attacks out of the server (**done**, `amtp/adversary.py`).
 6. Split `user.py` into Query (trapdoor), Verify and Access.
 7. Turn `run_xquery` into the Router engine.
 8. Build the shared harness from the duplicated `Writer`, `summarize`, `measure`, `OpCounter` and query-replay code; move each baseline into `schemes/`. Merge the plotting scripts.
-9. Decide the legacy suites: regenerate `exp1_queries.json`, `exp2_layouts.json`, `exp5_workload.json` on dataset-v4, or retire `exp1`, `exp2`, `exp5`, `theta`.
-10. Add the Validator (D3) with Δ evidence, timed as part of the update cost.
+9. Legacy suites: `exp1_queries.json` and `exp5_workload.json` are on dataset-v4; regenerate `exp2_layouts.json` on dataset-v4 or retire `exp2`.
+10. Add the Validator (D3) with Δ evidence, timed as part of the update cost (**done**).
 
 ## 7. Bottleneck and weak-point register
 
@@ -234,19 +247,19 @@ Stage 2, in order (one pull request per step is fine):
 | ID | Severity | Where (today) | Problem | Fix | Type | Stage |
 |---|---|---|---|---|---|---|
 | B1 | critical | `Domain.publish_snapshot` → `Engine.snapshot` → `DomainState._build` | Every publish rebuilds every γ, ρ and Merkle tree (≈ N × 20 postings at N = 500k) and holds a second full copy of the index, throwing away the incremental work. | Proof reads a read-only view of the Commitment engine; the full rebuild becomes a test oracle run every k epochs. | code only | 2–3 |
-| B2 | high | `CloudServer.store_state`, `CloudServer.search` | The server keeps every epoch's full state forever and deep-copies every honest response (only for the replay demo). | Keep the current epoch, plus the previous one only when the adversary plug-in is loaded. | code only | 3 |
+| B2 | high | `CloudServer.store_state` | The server keeps every epoch's full state forever (the deep copy of honest responses for the replay demo moved into the adversary plug-in). | Keep the current epoch, plus the previous one only when the adversary plug-in is loaded. | code only | 3 |
 | B3 | critical | `build_response` (ASPA over `M_cov = ⋃ M_h`), `user._check_papc` | Every proof carries the full posting list of every query keyword, so an AND query costs as much as its most common keyword. Most likely reason AMTP lost to Chen et al. | Partition-pruned PAPC: make R^post leaves `H(PID ‖ γ)`; for AND, open components only in partitions shared by every keyword, send the rest as γ hashes. Process keywords rarest first. | protocol | 4 |
 | B4 | high | `Engine.commit` (version bump marks every key in `keys_in[pid]` dirty), `index.gamma` | `v` is inside every γ, so changing one file re-commits every keyword of its partition (up to ≈ θ_max × 20) instead of the file's 20. | Bind `v` only at `A = H(PID ‖ v ‖ R_P)`; drop it from γ. Freshness argument must be rechecked. | protocol | 4 |
-| B5 | medium | `hashing.enc`, `index.gamma`, `dht.ciphertext_id`, JSON + hex responses | Canonical JSON with hex strings on the hashing hot path; cids hash a hex-expanded JSON ciphertext. | `core/encoding.py`: fixed-width binary encoding, `cid = H(raw CT bytes)`, CBOR/msgpack on the wire. Same rule for the baselines (R4). | code only | 3 |
-| B6 | medium | `DHT.get` | Every read deep-copies and re-hashes the ciphertext; the user hashes it again in `b_ct`. | Immutable bytes, no copy; verify-on-read optional (storage-loss demo). | code only | 3 |
+| B5 | medium | `hashing.enc`, `index.gamma`, `dht.ciphertext_id`, JSON + hex responses | Canonical JSON with hex strings on the hashing hot path; cids hash a hex-expanded JSON ciphertext. | `core/encoding.py`: fixed-width binary encoding, `cid = H(raw CT bytes)`, CBOR/msgpack on the wire. Same rule for the baselines (R4). | **done**: tagged binary encodings in `core/hashing.py` (γ, query digest, transition message, B_Q), `cid = H(raw CT bytes)`; sizes counted in binary for every scheme by `baselines/wire_sizes.py` (the in-process JSON transport is not timed) |
+| B6 | medium | `DHT.get` | Every read deep-copied and re-hashed the ciphertext; the user hashes it again in `b_ct`. | **done**: immutable bytes, no copy. | code only | 3 |
 | B7 | high | `Engine.comp`, `fwd`, `keys_in`, `gam` | ≈ 10M posting entries at 500k files as nested dicts keyed by 32-byte `bytes`: several GB before B1's copy. | Integer ids for cids and keywords at ingest; postings as integer arrays per (keyword, partition). | code only | 3 |
-| B8 | low | `merkle.multiverify` (`remaining.pop(0)`), `AdaptivePolicy.adapt` (`queue.pop(0)`, partner scan over all partitions), `Engine._rebuild_part_tree`, `Engine._post_root` | Small quadratic or full-rebuild spots that grow with small θ or large proofs. | Index pointer; `deque` + heap keyed by `(live, PID)`; free-position trick (as in the IMT) for the partition tree and R^post trees. | code only | 3 |
+| B8 | low | `AdaptivePolicy.adapt` (`queue.pop(0)`, partner scan over all partitions), `Engine._rebuild_part_tree`, `Engine._post_root` | Small quadratic or full-rebuild spots that grow with small θ or large proofs. | Index pointer; `deque` + heap keyed by `(live, PID)`; free-position trick (as in the IMT) for the partition tree and R^post trees. | code only | 3 |
 | B9 | low | `CloudServer.used_nonces` | Nonce set never shrinks. | Keep nonces only for the `MAX_AGE_S` window. | code only | 3 |
 | B10 | low | `HashCounter` (class-level globals) | Undercounts as soon as work runs in other processes. | Counter object per engine; workers return their counts. | code only | 3 |
 | B11 | medium | `Corpus.encrypt`, whole pipeline | Everything is single-threaded; ingest of 500k files is serial. | Worker pool for Ingest, Commitment per domain, Proof, Verify (section 8). | code only | 3 |
-| W1 | high | `owner.py` + `index.PartitionLayout` vs `engine.py` + `variants.py` | The demo and the benchmarks run different index code. | Stage 2, step 3. | consistency | 2 |
+| W1 | high | `owner.py` + `index.PartitionLayout` vs `engine.py` + `variants.py` | The demo and the benchmarks ran different index code. | **done**: one code path (`PartitionLayout` removed). | consistency | 2 |
 | W2 | medium | `bench.experiments.run_xquery` | Cross-domain search exists only inside the benchmark, sequential per domain. | Router engine; per-domain work can run in parallel. | missing engine | 2 |
-| W3 | high | Phase 2, step 5 | Owner-side transition validation is described in the paper but not implemented or timed. | Validator (D3). | paper vs code | 2 |
+| W3 | high | Phase 2, step 5 | Owner-side transition validation was described in the paper but not implemented or timed. | **done**: `validator.py`, timed in Exp. 3. | paper vs code | 2 |
 | W4 | low | `CloudServer._admit` | A commit between `make_query` and `search` rejects an honest query with no hint. | Return the current `e*` in the rejection; client retries once. | usability | 3 |
 | W5 | low | `crypto.py` | CP-ABE and ABS are stand-ins (documented). | No change; Access and Anchor engines isolate them for a later real scheme. | known limitation | — |
 
@@ -286,6 +299,17 @@ Advisor's plan (dataset-v4, 4 domains × 125,000 files, κ = 20), as run by `scr
 | `update` | update cost, insert / delete batches | AMTP, Chen et al. |
 | `theta` | θ sweep: query vs update cost | AMTP |
 | `splitmerge` | split / merge under skewed growth, θ_max = 64 / 128 / 256 | AMTP, Static-MT, Global-MT |
+
+**Proof and response size (one rule for every scheme, `baselines/wire_sizes.py`).** Sizes are
+counted in binary, never as JSON or hex text: every hash value, Merkle node, HMAC / PRF tag and
+hash-sized identifier (cid) is 32 B; every number (count, position, slot, epoch, version, file or
+partition identifier) is 8 B; a nonce is 16 B; ciphertexts, group elements and other byte strings
+count their real length. `proof_bytes` is the authentication data the user needs to verify the
+result, without the files; `response_bytes` is everything the server returns, i.e. `proof_bytes`
+plus every returned file (identifier and ciphertext) plus any header or signature. A scheme that
+does not model file encryption (Chen et al. returns only encrypted bitmaps) is charged the
+standard AES-GCM ciphertext of each returned file (plaintext + 28 B), so every `response_bytes`
+includes the files the user receives.
 
 What the figures must bring out, beyond time: AMTP **never accepts a wrong result** (every tamper
 is detected), and it **identifies which files are wrong** (`full_check`), while keeping the
@@ -327,7 +351,7 @@ bash scripts/aws_run_all.sh check                          # dataset + tests + b
 | Symbol | Meaning |
 |---|---|
 | `i`, `D_i` | domain |
-| `e`, `e*` | epoch; latest finalized epoch on the anchor |
+| `e`, `e*` | epoch (one batch of `b` operations, default `b = 1`); latest finalized epoch on the anchor |
 | `h_w = H(DEnc_Ks(w))` | protected keyword token |
 | `cid = H(CT)` | ciphertext id |
 | `P_j`, `PID`, `v`, `ℓ` | partition, its id, its version, a slot in it |

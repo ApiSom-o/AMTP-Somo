@@ -17,6 +17,7 @@ About the two stand-ins (be explicit about this when presenting):
 """
 import hmac
 import hashlib
+import json
 import os
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -29,6 +30,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.exceptions import InvalidSignature, InvalidTag
 
 from .boolean import parse
+from .hashing import enc
 
 
 # ---------- symmetric ----------
@@ -42,9 +44,55 @@ def aes_gcm_decrypt(key: bytes, box: dict, aad: bytes) -> bytes:
     return AESGCM(key).decrypt(bytes.fromhex(box["N"]), bytes.fromhex(box["C"]), aad)
 
 
+# ---------- outsourced object CT_d = <E_d, C_Kd, aad_d> (Phase 1, eq. 4) ----------
+
+CT_MAGIC = b"AMTP-CT1"
+_CT_FIELDS = 4          # N_d, C_d (ciphertext ‖ GCM tag), C_Kd, aad_d
+
+
+def make_ct(k_d: bytes, plaintext: bytes, ck: dict, aad: dict) -> bytes:
+    """Encrypt one document and return CT_d as raw bytes. aad_d is encoded once and the same
+    bytes are both the AES-GCM associated data and the aad field of CT_d."""
+    aad_b = enc(aad)
+    return pack_ct(aes_gcm_encrypt(k_d, plaintext, aad_b), ck, aad_b)
+
+
+def pack_ct(e: dict, ck: dict, aad_b: bytes) -> bytes:
+    """CT_d bytes: CT_MAGIC, then N_d, C_d, C_Kd and aad_d, each with a 4-byte big-endian length.
+    cid_d = H(CT_d) is computed over exactly these bytes."""
+    out = [CT_MAGIC]
+    for part in (bytes.fromhex(e["N"]), bytes.fromhex(e["C"]), enc(ck), aad_b):
+        out += [len(part).to_bytes(4, "big"), part]
+    return b"".join(out)
+
+
+def unpack_ct(ct: bytes) -> dict:
+    """Parse CT_d bytes into {"E": {"N", "C"}, "CK", "aad", "aad_b"}; raises ValueError if malformed."""
+    if not isinstance(ct, bytes) or not ct.startswith(CT_MAGIC):
+        raise ValueError("not an AMTP ciphertext")
+    parts, i = [], len(CT_MAGIC)
+    for _ in range(_CT_FIELDS):
+        if i + 4 > len(ct):
+            raise ValueError("truncated ciphertext")
+        n = int.from_bytes(ct[i:i + 4], "big")
+        i += 4
+        if i + n > len(ct):
+            raise ValueError("truncated ciphertext")
+        parts.append(ct[i:i + n])
+        i += n
+    if i != len(ct):
+        raise ValueError("trailing bytes in ciphertext")
+    nonce, c, ck_b, aad_b = parts
+    ck, aad = json.loads(ck_b), json.loads(aad_b)
+    if not isinstance(ck, dict) or not isinstance(aad, dict):
+        raise ValueError("malformed ciphertext fields")
+    return {"E": {"N": nonce.hex(), "C": c.hex()}, "CK": ck, "aad": aad, "aad_b": aad_b}
+
+
 def keyword_cipher(k_s: bytes, word: str) -> bytes:
-    """C_w = DEnc_{K_s}(Norm(w)). Same word + same key -> same ciphertext."""
-    return AESSIV(k_s).encrypt(word.strip().lower().encode(), None)
+    """C_w = DEnc_{K_s}(w) for an already normalised keyword (Norm is applied by
+    owner.keyword_key). Same word + same key -> same ciphertext."""
+    return AESSIV(k_s).encrypt(word.encode(), None)
 
 
 def hmac_tag(key: bytes, msg: bytes) -> bytes:
@@ -131,6 +179,7 @@ def unwrap(blob: dict, user_keys: dict):
 
 
 __all__ = [
-    "aes_gcm_encrypt", "aes_gcm_decrypt", "keyword_cipher", "hmac_tag", "hmac_ok",
+    "aes_gcm_encrypt", "aes_gcm_decrypt", "make_ct", "pack_ct", "unpack_ct", "CT_MAGIC",
+    "keyword_cipher", "hmac_tag", "hmac_ok",
     "Signer", "sig_ok", "AttributeAuthority", "unwrap", "InvalidTag",
 ]

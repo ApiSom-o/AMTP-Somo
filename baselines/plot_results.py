@@ -55,6 +55,9 @@ PARTS = {
 # ============================================================================
 # 1) อ่านข้อมูล
 # ============================================================================
+
+DATASET = "dataset-v4 (arXiv)"    # caption label; --dataset overrides it
+
 def load(scheme, suite, folder):
     """อ่าน results/<scheme>/<scheme>_<suite>.csv  (ไม่มีไฟล์ -> None)"""
     path = os.path.join(folder, scheme, f"{scheme}_{suite}.csv")
@@ -423,7 +426,7 @@ def exp4_ablation(folder, out, note, compare_out=None):
             ax.set_ylim(bottom=0)
         ax.set_xticks(sorted({float(r["skew"]) for r in rows}))
         finish(fig, ax, f"Exp. 4 · AMTP ablation: {title}", "Skew (share of new files in one hot group)", ylabel,
-               f"dataset-v3 · {setup + ' · ' if setup else ''}median, ±1 std over batches · {note}",
+               f"{DATASET} · {setup + ' · ' if setup else ''}median, ±1 std over batches · {note}",
                os.path.join(out, f"amtp_{tag}_{name}"), legend_title="Variant")
         if compare_out:                                # every variant in the combined style
             fig, ax = paper_fig()
@@ -439,7 +442,7 @@ def exp4_ablation(folder, out, note, compare_out=None):
             ax.set_xticks(sorted({float(r["skew"]) for r in rows}))
             paper_finish(fig, ax, "a" if col == "update_ms" else "b", f"Exp. 4: {title}",
                          "Skew (share of new files in one hot group)", ylabel.replace(", log", ""),
-                         f"dataset-v3 · {setup + ' · ' if setup else ''}median, ±1 std over batches · "
+                         f"{DATASET} · {setup + ' · ' if setup else ''}median, ±1 std over batches · "
                          f"Exp. 4 compares AMTP with its own ablations (no baseline has partitions) · {note}",
                          os.path.join(compare_out, f"compare_{tag}_{name}"))
 
@@ -683,16 +686,19 @@ def figs_exp5(data, out, note, note_u, kq=4):
 # 6) main
 # ============================================================================
 def main():
+    global DATASET
     ap = argparse.ArgumentParser(description="plot baseline results")
     ap.add_argument("schemes", nargs="+", choices=list(NAME), help="scheme ที่จะวาด")
     ap.add_argument("--results", default=os.path.join(HERE, "results"), help="โฟลเดอร์ผล (มี <scheme>/ อยู่ข้างใน)")
     ap.add_argument("--out", default=None, help="โฟลเดอร์รูปเดียวสำหรับทุกกราฟ (ค่าเริ่มต้น <results>/<scheme>/figures และ <results>/compare)")
     ap.add_argument("--reps", type=int, default=30, help="จำนวนรอบที่วัด (เขียนในหมายเหตุท้ายภาพ)")
     ap.add_argument("--note", default="test machine (not final numbers)", help="หมายเหตุท้ายภาพ")
+    ap.add_argument("--dataset", default="dataset-v4 (arXiv)", help="ชื่อ dataset ที่เขียนในหมายเหตุท้ายภาพ")
     a = ap.parse_args()
-    base = f"dataset-v3 (arXiv) · median of {a.reps} runs, error bars ±1 std · {a.note}"
-    perq = f"dataset-v3 (arXiv) · median over queries (each: median of {a.reps} runs), error bars: fastest–slowest query · {a.note}"
-    one = f"dataset-v3 (arXiv) · one point per query (median of {a.reps} runs), every shape · {a.note}"
+    DATASET = a.dataset
+    base = f"{DATASET} · median of {a.reps} runs, error bars ±1 std · {a.note}"
+    perq = f"{DATASET} · median over queries (each: median of {a.reps} runs), error bars: fastest–slowest query · {a.note}"
+    one = f"{DATASET} · one point per query (median of {a.reps} runs), every shape · {a.note}"
     cmp_out = a.out or os.path.join(a.results, "compare")    # กราฟรวมทุก scheme
     os.makedirs(cmp_out, exist_ok=True)
     every = {suite: {} for suite in ("exp1_boolean_scalability", "exp2_selective_proof", "exp3_dynamic_update",

@@ -56,7 +56,7 @@ Simulation ของ baseline SE-COLLAB [37]
 หมายเหตุ: paper ไม่ได้ใช้ index Merkle root ตอนตรวจผล -> ผลลัพธ์ที่ถูกตัดทิ้งจะตรวจไม่เจอ
 (เป็นพฤติกรรมของ paper ไม่ใช่บั๊กของการจำลอง; selftest ข้อ t_omission_not_detected)
 
-Workload: dataset กลางของ AMTP (GitHub release dataset-v3, arXiv 4 domain) ผ่าน amtp_dataset.py
+Workload: dataset กลางของ AMTP (dataset-v4, arXiv 4 domain x 125,000 ไฟล์, ไฟล์ใน datasets/arxiv/data_v4/) ผ่าน amtp_dataset.py
   - N เอกสาร = N/4 ไฟล์แรกของแต่ละ domain (ไม่สุ่ม) -> ทุก scheme ได้เอกสารชุดเดียวกัน
   - keyword ใช้ที่สกัดไว้ใน documents.csv ตรง ๆ, เนื้อหาที่เข้ารหัส = ไฟล์ .txt จริง
   - exp1 ตรวจผลทุก query กับ ground truth จาก plaintext index (ต้องตรงเป๊ะ)
@@ -1758,7 +1758,7 @@ def suite_xdomains(args):
     ตามหมวด arXiv (domain_groups.csv) ส่ง query ทุกตัวของ boolean_multi ไปทุก owner
     ผลรวมต้องเท่ากับผลรวมราย domain ในไฟล์ (กลุ่มแบ่งไฟล์ชุดเดียวกัน)"""
     D = dataset()
-    qs = D.boolean_multi_queries()[:args.max_queries or None]
+    qs = D.select_queries(D.boolean_multi_queries(), args.x_kq, args.shapes, args.max_queries)
     names = list(D.DOMAINS)
     print(f"[xdomains] D={args.d_counts} files/domain={args.fix} queries={len(qs)} proof={args.proof_mode}")
     w = Writer("domains_scaling", args.out)
@@ -2034,7 +2034,7 @@ def main():
                                      "search1", "verify1", "tamper", "xsearch", "xverify", "xdomains"],
                     help="all = paper + exp1 + exp2 + revocation")  # โหมดที่จะรัน
     # ---- dataset กลาง (amtp_dataset.py) ----
-    ap.add_argument("--data", default=None, help="โฟลเดอร์ amtp_file_db (ค่าเริ่มต้น <repo>/data/amtp_file_db)")
+    ap.add_argument("--data", default=None, help="โฟลเดอร์ dataset (ค่าเริ่มต้น <repo>/data/amtp_file_db_v4 หรือ AMTP_DATA)")
     ap.add_argument("--domains", nargs="+", default=["D1", "D2", "D3", "D4"], help="domain ที่ใช้")
     ap.add_argument("--seed", type=int, default=42, help="seed ของการสร้าง query (เท่ากับ seed ของ dataset)")
     # ---- ชื่อและค่าเริ่มต้นเหมือน chen_et_al_sim.py ----
@@ -2059,6 +2059,9 @@ def main():
     ap.add_argument("--fix", type=int, default=Dm.V4_FIX, help="verify1 / xsearch / xverify / xdomains: ไฟล์ต่อ domain")
     ap.add_argument("--d-counts", type=int, nargs="+", default=Dm.D_COUNTS, help="xdomains: จำนวน domain")
     ap.add_argument("--max-queries", type=int, default=0, help="xdomains: ใช้ query n ตัวแรก (0 = ทั้งหมด)")
+    ap.add_argument("--x-kq", type=int, nargs="+", default=None, help="xdomains: เฉพาะ kQ เหล่านี้ (ค่าเริ่มต้น ทุกค่า)")
+    ap.add_argument("--shapes", nargs="+", default=None, choices=["AND", "OR", "AND_of_OR", "OR_of_AND"],
+                    help="xdomains: เฉพาะรูป query เหล่านี้ (ค่าเริ่มต้น ทุกแบบ)")
     ap.add_argument("--tamper-kinds", nargs="+", default=Dm.TAMPER_KINDS, choices=Dm.TAMPER_KINDS)
     ap.add_argument("--proof-mode", choices=["paths", "multi"], default="paths",
                     help="v4 suites: แบบ proof (paths = Merkle path ทีละไฟล์ตาม Phase 6 ของ paper; "

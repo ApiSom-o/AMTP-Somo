@@ -2,7 +2,7 @@
 stream and queries for every variant (this is what makes the comparison fair).
 
 Document sources:
-  * arxiv_docs(n)      the shared arXiv dataset (release dataset-v3, primary dataset).
+  * arxiv_docs(n)      the shared arXiv dataset (dataset-v4, datasets/arxiv/data_v4/, primary dataset).
                        W(d) is read from documents.csv -- the same keyword sets every
                        baseline uses; nothing is re-extracted. Initial documents =
                        amtp_dataset.sample(n), fresh (inserted) documents = insert pool.
@@ -19,6 +19,7 @@ from email import policy as email_policy
 
 from amtp.core.hashing import H, enc
 from amtp.dht import ciphertext_id
+from amtp.core.crypto import pack_ct
 from amtp.index import extract_keywords
 
 
@@ -30,8 +31,8 @@ class Doc:
         self.keys = frozenset(H("kw", w) for w in words)   # stands in for h_w = H(DEnc(w))
         # Small placeholder ciphertext: the structure benchmarks do not decrypt,
         # but the verifier still checks H(CT) = cid and the domain binding.
-        self.ct = {"E": {"N": "00", "C": H(doc_id, *sorted(words)).hex()},
-                   "CK": {"t": "none"}, "aad": {"domain": domain, "doc": doc_id, "policy": "-"}}
+        self.ct = pack_ct({"N": "00", "C": H(doc_id, *sorted(words)).hex()}, {"t": "none"},
+                          enc({"domain": domain, "doc": doc_id, "policy": "-"}))
         self.cid = ciphertext_id(self.ct)
 
 

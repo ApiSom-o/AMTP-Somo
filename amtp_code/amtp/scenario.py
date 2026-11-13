@@ -1,8 +1,9 @@
 """Demo world: two domains, four users, a dozen fictional records.
 
 All names and records are invented for the demo. The real experiments use
-the Enron e-mail corpus instead.
+the shared arXiv dataset-v4 (datasets/arxiv/) instead.
 """
+from .adversary import Adversary
 from .anchor import RootAnchor
 from .core.crypto import AttributeAuthority
 from .owner import DataOwner, DomainKeys
@@ -90,6 +91,7 @@ class World:
         self.authority = AttributeAuthority()
         self.anchor = RootAnchor()
         self.server = CloudServer()
+        self.adversary = Adversary(self.server)     # demo and tests only
         self.keys = {d: DomainKeys() for d in DOMAINS}
         self.owners = {}
         self.pending = {d: [_doc(t) for t in PENDING[d]] for d in DOMAINS}
@@ -121,9 +123,10 @@ class World:
         from .index import extract_keywords
         published = [_doc(t) for t in DOCS[domain] + PENDING[domain]
                      if t[0] not in {p["id"] for p in self.pending[domain]}]
+        from .nlp import norm
         sets = {}
         ast = boolean.parse(text)
         for w in boolean.leaves(ast):
             sets[w] = {d["id"] for d in published
-                       if w in extract_keywords(d["title"] + " " + d["body"])}
+                       if norm(w) in {norm(k) for k in extract_keywords(d["title"] + " " + d["body"])}}
         return boolean.evaluate(ast, sets)

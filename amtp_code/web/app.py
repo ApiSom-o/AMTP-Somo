@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template, request
 
 from amtp.core.boolean import ParseError
 from amtp.scenario import DOMAINS, EXAMPLE_QUERIES, World
-from amtp.server import ATTACKS
+from amtp.adversary import ATTACKS
 
 app = Flask(__name__)
 _lock = threading.Lock()
@@ -66,7 +66,7 @@ def _search_one(user, domain, text, mode):
                                                              key=lambda x: x[1])],
         "expression": ctx["text"],
     }
-    result = world.server.search(t_q, mode)
+    result = world.adversary.search(t_q, mode)
     card["attack"] = result.get("attack")
     card["cs_ms"] = result.get("cs_ms")
     if result["status"] != "ok":
@@ -96,9 +96,9 @@ def _search_one(user, domain, text, mode):
 def publish():
     d = request.get_json(force=True)["domain"]
     with _lock:
-        before = len(world.owners[d].layout.log)
+        before = len(world.owners[d].structure_log)
         doc = world.publish_next(d)
-        splits = world.owners[d].layout.log[before:]
+        splits = [f"{r[0]} {r[1][:8]}" for r in world.owners[d].structure_log[before:]]
         return jsonify({"published": doc and doc["title"], "splits": splits, "state": _state()})
 
 

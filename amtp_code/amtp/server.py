@@ -1,37 +1,34 @@
-"""Cloud Server (Phase 4): admit the query, evaluate it, assemble evidence.
+"""Cloud Server: Phase 2 update preparation and Phase 4 search for an HONEST server.
 
-The server is untrusted. `mode` lets the demo make it misbehave in one
-specific way so the user can watch Phase 5 catch it. Every attack below is a
-real modification of the real response; nothing about the verdict is faked.
+There is no attack code here. The demo and the tests load the adversary plug-in
+(amtp/adversary.py), which wraps this server; the benchmarks never do.
 """
-import bisect
-import copy
 import time
 
 from .core import boolean
-from .core.crypto import hmac_ok
+from .core.crypto import hmac_ok, sig_ok
 from .dht import DHT, StorageError
-from .core.hashing import H, enc
-from .index import EMPTY_SLOT, SENTINEL_LO
-from .core.merkle import MerkleTree
-
-ATTACKS = {
-    "honest": "Honest server",
-    "tamper_ct": "Modify a returned file",
-    "drop_result": "Hide one matching file",
-    "extra_result": "Add a file that does not match",
-    "hide_posting": "Remove an entry from a keyword's posting list",
-    "false_absent": "Claim a keyword does not exist",
-    "forge_partition": "Forge a partition's content",
-    "stale": "Answer from an old epoch (rollback)",
-    "replay": "Replay an earlier response",
-    "storage_loss": "Ciphertext lost in storage",
-}
-
+from .engine import Engine
+from .update import delta, enc_aff, request_digest
+from .core.hashing import H, TAG_QUERY, enc_bq
+from .index import SENTINEL_LO
 
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
-    """H(i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η) — the message under τ_Q."""
-    return H(domain, enc(b_q), epoch, t, bytes.fromhex(nonce_hex))
+    """H(tag ‖ i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η): the message under τ_Q, all fields binary."""
+    return H(TAG_QUERY, domain, enc_bq(boolean.from_json(b_q)), epoch, t, bytes.fromhex(nonce_hex))
+
+
+def bq_error(b_q):
+    """None if B_Q is a canonical AND/OR tree over 32-byte hex query keys, else the reason."""
+    try:
+        ast = boolean.from_json(b_q)
+        if any(len(bytes.fromhex(h)) != 32 for h in boolean.leaves(ast)):
+            return "query keys must be 32-byte values"
+        if enc_bq(boolean.canonical(ast)) != enc_bq(ast):
+            return "B_Q is not in canonical form"
+    except (TypeError, ValueError, IndexError, KeyError):
+        return "B_Q is malformed"
+    return None
 
 
 class CloudServer:
@@ -42,7 +39,111 @@ class CloudServer:
         self.query_keys = {}      # domain -> K_a
         self.dht = DHT()
         self.used_nonces = set()
-        self.last_response = {}   # domain -> last honest response (for the replay scenario)
+        self.engines = {}         # domain -> Engine (the CS's working index)
+        self.owner_keys = {}      # domain -> public keys allowed to sign U_op
+        self.docs = {}            # domain -> Doc_i (id -> cid), finalized
+        self.request_nonces = set()
+        self._pending = {}        # domain -> candidate awaiting validation and anchoring
+
+    # ----- Phase 2: update protocol (CS side) -----
+    def create_domain(self, domain, policy, owner_keys, ops_per_epoch=1):
+        """Set up the domain's index; returns the genesis PIDs (public setup data for R^(0))."""
+        eng = Engine(domain, policy, ops_per_epoch)
+        self.engines[domain] = eng
+        self.owner_keys[domain] = list(owner_keys)
+        self.docs[domain] = {}
+        self.store_state(eng.snapshot())
+        return sorted(eng.parts)
+
+    def prepare_update(self, domain, requests) -> dict:
+        """Admit up to b signed requests, apply them, adapt and repair, and return the candidate
+        transition: roots, placements, Aff_i, Δ_i and the evidence π^upd for the validating owner."""
+        eng = self.engines[domain]
+        if domain in self._pending:
+            raise ValueError("a candidate for this domain is still awaiting validation")
+        if not requests or len(requests) > eng.ops_per_epoch:
+            raise ValueError(f"an epoch takes 1..{eng.ops_per_epoch} requests")
+        r_old, r_part_old, r_idx_old = eng.R_D, eng.part_tree.root, eng.imt.root
+        docs, seen, placements, deletes, stored = dict(self.docs[domain]), set(), [], [], []
+        eng.begin()                       # working successor: every change can be rolled back
+        try:
+            proposal = self._prepare(domain, eng, requests, docs, seen, placements, deletes, stored,
+                                     r_old, r_part_old, r_idx_old)
+        except Exception:
+            eng.rollback()
+            self._drop_stored(stored)
+            raise
+        self._pending[domain] = (docs, deletes, seen, stored)
+        return proposal
+
+    def _prepare(self, domain, eng, requests, docs, seen, placements, deletes, stored,
+                 r_old, r_part_old, r_idx_old):
+        for req in requests:
+            u, sig = req["U"], req["sig"]
+            if not any(sig_ok(k, request_digest(u), sig) for k in self.owner_keys[domain]):
+                raise ValueError("σ_op invalid")
+            if u["domain"] != domain or u["epoch"] != eng.epoch:
+                raise ValueError("request is not for the current finalized epoch")
+            if u["nonce"] in self.request_nonces or u["nonce"] in seen:
+                raise ValueError("request nonce already used")
+            seen.add(u["nonce"])
+            if u["op"] == "insert":
+                cid = H(u["ct"])
+                if docs.get(u["id"]) is not None or cid in eng.loc:
+                    raise ValueError("identifier or ciphertext already live")
+                if not self.dht.has(cid):
+                    stored.append(cid)
+                self.dht.put(cid, u["ct"])
+                placements.append(list(eng.insert(cid, {H(c) for c in u["C"]}, u["bucket"])))
+                docs[u["id"]] = cid
+            else:
+                cid = u["cid"]
+                if docs.get(u["id"]) != cid:
+                    raise ValueError("delete of a document that is not live")
+                eng.delete(cid)
+                placements.append(None)
+                deletes.append(cid)
+                docs[u["id"]] = None
+        st = eng.commit(evidence=True)
+        pi = dict(st["pi"], R_part_old=r_part_old, R_idx_old=r_idx_old)
+        d = delta(domain, eng.epoch, requests, enc_aff(st["aff"]), r_old, eng.R_D)
+        proposal = {"domain": domain, "epoch_old": eng.epoch - 1, "epoch_new": eng.epoch,
+                    "R_old": r_old, "R_new": eng.R_D, "placements": placements,
+                    "aff": st["aff"], "delta": d, "pi": pi, "stats": {k: v for k, v in st.items()
+                                                                       if k not in ("aff", "pi")}}
+        return proposal
+
+    def abort_update(self, domain):
+        """The candidate was rejected (by the owner's Validator or the Root Anchor): discard it and
+        restore the finalized predecessor, so a new candidate can be prepared against it (Phase 2,
+        Step 5: obsolete proposals are regenerated against the current predecessor)."""
+        _, _, _, stored = self._pending.pop(domain)
+        self.engines[domain].rollback()
+        self._drop_stored(stored)
+
+    def _drop_stored(self, cids):
+        for cid in cids:                  # ciphertexts first stored by the discarded candidate
+            self.dht.delete(cid)
+
+    def finalize_update(self, domain, snapshot=True):
+        """After the Root Anchor accepted the transition: expose the successor snapshot and drop
+        the ciphertexts of deleted documents (only now, as Phase 2 requires). snapshot=False skips
+        building the query snapshot (update-only benchmarks)."""
+        docs, deletes, seen, _ = self._pending.pop(domain)
+        eng = self.engines[domain]
+        eng.accept()
+        self.docs[domain] = {i: c for i, c in docs.items() if c is not None}
+        self.request_nonces |= seen
+        for cid in deletes:
+            if cid not in eng.loc:        # not re-inserted by the same batch
+                self.dht.delete(cid)
+        if not snapshot:
+            return None
+        state = eng.snapshot()
+        if state.R_D != eng.R_D:
+            raise RuntimeError("incremental R_D differs from the full rebuild")
+        self.store_state(state)
+        return state
 
     # ----- storage (called by the Data Owner) -----
     def store_ciphertext(self, cid, ct):
@@ -59,31 +160,33 @@ class CloudServer:
         return epochs[max(epochs)]
 
     # ----- Phase 4 -----
-    def search(self, t_q: dict, mode: str = "honest") -> dict:
+    def search(self, t_q: dict, respond=None) -> dict:
+        """Admit the query, pin the current finalized snapshot and answer it. `respond(state, B_Q, η)`
+        replaces the honest builder; only the adversary plug-in passes one."""
         start = time.perf_counter()
         reason = self._admit(t_q)
         if reason:
             return {"status": "rejected", "reason": reason}
-        domain = t_q["domain"]
         b_q = boolean.from_json(t_q["B_Q"])
-        state = self.current(domain)
-        attack = {"mode": mode, "label": ATTACKS.get(mode, mode), "applied": False, "what": ""}
-
+        state = self.current(t_q["domain"])
         try:
-            response = self._attack(mode, attack, state, b_q, t_q)
+            if respond is None:
+                response = build_response(state, b_q, t_q["nonce"], self.dht)
+            else:
+                response = respond(state, b_q, t_q["nonce"])
         except StorageError as err:
-            return {"status": "storage_error", "reason": str(err), "attack": attack,
-                    "cs_ms": _ms(start)}
+            return {"status": "storage_error", "reason": str(err), "cs_ms": _ms(start)}
         for desc in response["proof"]["partitions"]:
             desc.pop("_positions", None)          # internal helper, not sent
-        if mode == "honest":
-            self.last_response[domain] = copy.deepcopy(response)
-        return {"status": "ok", "response": response, "attack": attack, "cs_ms": _ms(start)}
+        return {"status": "ok", "response": response, "cs_ms": _ms(start)}
 
     def _admit(self, t_q):
         domain = t_q.get("domain")
         if domain not in self.states:
             return "unknown domain"
+        reason = bq_error(t_q["B_Q"])
+        if reason:
+            return reason
         msg = query_digest(domain, t_q["B_Q"], t_q["epoch"], t_q["t"], t_q["nonce"])
         if not hmac_ok(self.query_keys[domain], msg, bytes.fromhex(t_q["tau"])):
             return "query tag τ_Q is invalid (user has no query key for this domain)"
@@ -96,74 +199,14 @@ class CloudServer:
         self.used_nonces.add(t_q["nonce"])
         return None
 
-    def _attack(self, mode, attack, state, b_q, t_q):
-        domain, nonce = t_q["domain"], t_q["nonce"]
-        keys = sorted(boolean.leaves(b_q))
-        present = [h for h in keys if bytes.fromhex(h) in state.postings]
-
-        if mode == "stale":
-            older = self.states[domain].get(state.epoch - 1)
-            if older is not None:
-                resp = build_response(older, b_q, nonce, self.dht)
-                resp["epoch"] = state.epoch      # pretend it is the current epoch
-                attack.update(applied=True, what=f"used snapshot of epoch {older.epoch} "
-                                                 f"but labelled it epoch {state.epoch}")
-                return resp
-        if mode == "replay" and domain in self.last_response:
-            attack.update(applied=True, what="returned the previous search's response")
-            return copy.deepcopy(self.last_response[domain])
-        if mode == "hide_posting" and present:
-            h, cid = _pick_entry(state, b_q, present, self.dht)
-            attack.update(applied=True, what=f"removed file {cid[:8]} from one keyword's list")
-            return build_response(state, b_q, nonce, self.dht, hide=(h, cid))
-        if mode == "false_absent" and present:
-            h = present[0]
-            attack.update(applied=True, what="claimed one queried keyword is not indexed")
-            return build_response(state, b_q, nonce, self.dht, fake_absent=h)
-        if mode == "storage_loss":
-            m_q = evaluate_on_state(state, b_q)
-            if m_q:
-                cid = bytes.fromhex(sorted(m_q)[0][0])
-                attack.update(applied=True, what="all replicas of one result file are offline")
-                return build_response(state, b_q, nonce, self.dht,
-                                      offline=set(self.dht.replica_nodes(cid)))
-
-        resp = build_response(state, b_q, nonce, self.dht)
-        rct = resp["R_ct"]
-        if mode == "tamper_ct" and rct:
-            c = rct[0]["ct"]["E"]["C"]
-            rct[0]["ct"]["E"]["C"] = c[:-2] + ("00" if c[-2:] != "00" else "01")
-            attack.update(applied=True, what=f"changed one byte of file {rct[0]['cid'][:8]}")
-        elif mode == "drop_result" and rct:
-            gone = rct.pop()
-            attack.update(applied=True, what=f"left out file {gone['cid'][:8]}")
-        elif mode == "extra_result":
-            inside = {r["cid"] for r in rct}
-            extra = next((c for c in sorted(state.loc) if c.hex() not in inside), None)
-            if extra is not None:
-                pid, slot = state.loc[extra]
-                rct.append({"cid": extra.hex(), "pid": pid, "loc": slot,
-                            "ct": self.dht.get(extra)})
-                attack.update(applied=True, what=f"added non-matching file {extra.hex()[:8]}")
-        elif mode == "forge_partition" and resp["proof"]["partitions"]:
-            desc = resp["proof"]["partitions"][0]
-            fake = list(state.by_pid[desc["pid"]].slots) + [H("forged file")]
-            tree = MerkleTree(fake)
-            desc.update(R_P=tree.root.hex(), n_slots=len(fake),
-                        proof=[x.hex() for x in tree.multiproof(desc["_positions"])])
-            attack.update(applied=True,
-                          what=f"slipped a forged file into partition {desc['pid']}")
-        if mode != "honest" and not attack["applied"]:
-            attack["what"] = "not applicable to this query, server answered honestly"
-        return resp
-
-
 def _ms(start):
     return round((time.perf_counter() - start) * 1000, 2)
 
 
-def _components(state, h: bytes):
-    return [(pid, [(cid.hex(), slot) for cid, slot in comp]) for pid, comp in state.postings[h]]
+def _components(state, h: bytes, posting=None):
+    """L_h on the wire: [(PID, [(cid hex, ℓ), ...]), ...] in PID order."""
+    posting = state.postings[h] if posting is None else posting
+    return [(pid, [(cid.hex(), slot) for cid, slot in comp]) for pid, comp in posting]
 
 
 def evaluate_on_state(state, b_q) -> set:
@@ -171,42 +214,33 @@ def evaluate_on_state(state, b_q) -> set:
     for h in boolean.leaves(b_q):
         hb = bytes.fromhex(h)
         sets[h] = {(cid, pid, slot) for pid, comp in _components(state, hb)
-                   for cid, slot in comp} if hb in state.postings else set()
+                   for cid, slot in comp} if lookup(state, hb) is not None else set()
     return boolean.evaluate(b_q, sets)
 
 
-def _pick_entry(state, b_q, present, dht):
-    """Pick a (keyword, file) whose removal changes the visible result if possible."""
-    m_q = {c for c, _, _ in evaluate_on_state(state, b_q)}
-    for h in present:
-        for _, comp in _components(state, bytes.fromhex(h)):
-            for cid, _ in comp:
-                if cid in m_q:
-                    return h, cid
-    h = present[0]
-    return h, _components(state, bytes.fromhex(h))[0][1][0][0]
-
-
-def build_response(state, b_q, nonce, dht, hide=None, fake_absent=None, offline=()):
-    """R_Q = <i, e*, B_Q, η, R^part, R^idx, R^ct_Q, Π_Q> with ASPA multiproofs."""
+def build_response(state, b_q, nonce, dht, timing=None):
+    """R_Q = <i, e*, B_Q, η, R^part, R^idx, R^ct_Q, Π_Q> with ASPA multiproofs.
+    `timing` (a dict, benchmarks only) receives the time of each server phase in ms:
+    lookup (Search Tree + IMT evidence), eval (Boolean evaluation), proof (ASPA), fetch (DHT)."""
+    t0 = time.perf_counter()
     evidence, leaf_sets = [], {}
     for h in sorted(boolean.leaves(b_q)):
         hb = bytes.fromhex(h)
-        if hb in state.postings and h != fake_absent:
-            comps = _components(state, hb)
-            if hide and hide[0] == h:
-                comps = [(pid, [e for e in comp if e[0] != hide[1]]) for pid, comp in comps]
-                comps = [(pid, comp) for pid, comp in comps if comp]
+        posting = lookup(state, hb)
+        if posting is not None:
+            comps = _components(state, hb, posting)
             pos = state.imt_pos[hb]
             evidence.append({"h": h, "status": "present", "L": comps, "pos": pos,
                              "next": state.imt_next[hb].hex(), "n": state.imt_n,
                              "proof": [x.hex() for x in state.imt.multiproof([pos])]})
             leaf_sets[h] = {(cid, pid, slot) for pid, comp in comps for cid, slot in comp}
         else:
-            evidence.append(_absent_evidence(state, hb, lie=(h == fake_absent)))
+            evidence.append(_absent_evidence(state, hb))
             leaf_sets[h] = set()
 
+    t1 = time.perf_counter()
     m_q = boolean.evaluate(b_q, leaf_sets)
+    t2 = time.perf_counter()
     m_cov = set().union(*leaf_sets.values()) if leaf_sets else set()
     # group the covered slots by partition once (O(|m_cov|)), instead of scanning
     # all of m_cov for every partition (O(|S_cov| x |m_cov|))
@@ -230,10 +264,15 @@ def build_response(state, b_q, nonce, dht, hide=None, fake_absent=None, offline=
                     "proof": [x.hex() for x in state.part_tree.multiproof(dom_positions)]
                     if dom_positions else []}
 
+    t3 = time.perf_counter()
     r_ct = []
     for cid, pid, slot in sorted(m_q, key=lambda x: (x[1], x[2])):
-        ct = dht.get(bytes.fromhex(cid), offline=offline)   # may raise StorageError
-        r_ct.append({"cid": cid, "pid": pid, "loc": slot, "ct": ct})
+        ct = dht.get(bytes.fromhex(cid))     # raw CT bytes; may raise StorageError
+        r_ct.append({"cid": cid, "pid": pid, "loc": slot, "ct": ct.hex()})   # hex on the JSON wire
+    if timing is not None:
+        t4 = time.perf_counter()
+        timing.update(lookup=(t1 - t0) * 1e3, eval=(t2 - t1) * 1e3, proof=(t3 - t2) * 1e3,
+                      fetch=(t4 - t3) * 1e3)
 
     return {
         "domain": state.domain, "epoch": state.epoch, "B_Q": b_q, "nonce": nonce,
@@ -242,12 +281,19 @@ def build_response(state, b_q, nonce, dht, hide=None, fake_absent=None, offline=
     }
 
 
-def _absent_evidence(state, hb: bytes, lie=False):
-    """Non-membership: the predecessor leaf h_lo with h_lo < h < next(h_lo).
-    For a key that IS indexed (lie=True) the honest predecessor has next(h_lo) = h,
-    so the forged absence claim fails the bracket check."""
-    k = bisect.bisect_left(state.imt_sorted, hb)
-    lo = state.imt_sorted[k - 1] if k else SENTINEL_LO
+def lookup(state, hb: bytes):
+    """Phase 4 lookup: the Cuckoo filter answers "absent" at once (no false negatives); otherwise
+    the B+ Search Tree gives the posting state. None = not indexed. Neither structure is evidence:
+    present keys are proven by PAPC + IMT, absent keys by IMT non-membership."""
+    if not state.cuckoo.might_contain(hb):
+        return None
+    return state.postings.get(hb)
+
+
+def _absent_evidence(state, hb: bytes):
+    """Non-membership: the predecessor leaf h_lo with h_lo < h < next(h_lo). (If the key IS
+    indexed, the honest predecessor has next(h_lo) = h and the user's bracket check fails.)"""
+    lo = state.postings.predecessor(hb) or SENTINEL_LO     # B+ tree: largest indexed key below h
     pos = state.imt_pos[lo]
     leaf = {"pos": pos, "h": lo.hex(), "rho": state.imt_rho[lo].hex(),
             "next": state.imt_next[lo].hex()}

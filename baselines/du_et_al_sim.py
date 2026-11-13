@@ -38,7 +38,7 @@ Simulation ของ baseline Du et al. [7]
   9. Bloom filter มี false positive ได้ตาม paper -> ผลต้องครอบคลุม ground truth ทั้งหมด (missed = 0)
      ส่วนไฟล์เกินบันทึกไว้ในคอลัมน์ bloom_fp (ต่างจาก Chen [40] ที่ผลต้องตรงเป๊ะ)
 
-Dataset และ query: ใช้ dataset กลาง (arXiv dataset-v3) ผ่าน amtp_dataset.py เหมือน Chen [40]
+Dataset และ query: ใช้ dataset กลาง (arXiv dataset-v4) ผ่าน amtp_dataset.py เหมือน Chen [40]
   - เอกสาร = sample(N) ชุดเดียวกับทุก scheme, keyword W(d) จาก documents.csv, เนื้อหาไฟล์จาก files/*.txt
   - query = replay results/exp1_queries.json (ไฟล์กลาง) โดยค่าเริ่มต้น
   - ผลเขียนลง results/du/du_<suite>.csv รูปแบบเดียวกับ Chen: <metric>_ms, _ms_median, _ms_std
@@ -751,6 +751,9 @@ def run_query(sch, terms):
     info = dict(rQ=len(vr.fids), R_per_cloud=st.mean(R),  # จำนวนผลลัพธ์ที่ผ่าน / ต่อ cloud
                 filtered_out=vr.filtered_out,     # ผลจาก remapping collision ที่ถูกกรองทิ้ง
                 token_bytes=4 * len(Q),           # trapdoor = len(Q) ตำแหน่ง ตำแหน่งละ 4 byte ส่งให้ทุก cloud
+                # proof = หลักฐานที่ DU ใช้ตรวจ (E = Enc(BF_org), enc_id, e) ไม่รวม slice ของไฟล์
+                proof_bytes=sum(len(it["E"]) + len(it["enc_id"]) + len(it["e"])
+                                for items in responses.values() for it in items),
                 response_bytes=sum(len(it["E"]) + len(it["enc_id"]) + len(it["e"]) + len(it["slice"])
                                    for items in responses.values() for it in items),  # ที่ทุก cloud ส่งกลับ
                 ids=set(vr.fids))                 # ผลลัพธ์ (ไว้เทียบ ground truth ไม่เขียนลง CSV)
@@ -1061,7 +1064,7 @@ def main():
     ap = argparse.ArgumentParser(description="Du et al. [7] simulation")  # ตัวอ่าน argument
     ap.add_argument("mode", choices=["demo", "exp1", "exp2", "clouds", "search1", "verify1", "tamper"])  # โหมดที่จะรัน
     # ---- dataset กลาง (amtp_dataset.py) ชื่อเดียวกับ Chen ----
-    ap.add_argument("--data", default=None, help="โฟลเดอร์ amtp_file_db (ค่าเริ่มต้น <repo>/data/amtp_file_db)")
+    ap.add_argument("--data", default=None, help="โฟลเดอร์ dataset (ค่าเริ่มต้น <repo>/data/amtp_file_db_v4 หรือ AMTP_DATA)")
     ap.add_argument("--domains", nargs="+", default=["D1", "D2", "D3", "D4"], help="domain ที่ใช้")
     ap.add_argument("--seed", type=int, default=42, help="seed ของการสร้าง query (เท่ากับ seed ของ dataset)")
     ap.add_argument("--queries", default=None,

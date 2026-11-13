@@ -11,14 +11,20 @@ import os
 import pytest
 
 from amtp.core import boolean
+from amtp.core.crypto import unpack_ct
 from amtp.nlp import normalise_query_term, phase1_keywords
 from amtp.scenario import World
+
+
+def doc_of(r):
+    """Document id from the aad of a returned ciphertext (raw CT bytes, hex on the wire)."""
+    return unpack_ct(bytes.fromhex(r["ct"]))["aad"]["doc"]
 
 
 def run(world, uid, domain, text):
     user = world.users[uid]
     t_q, ctx = user.make_query(domain, text, world.anchor)
-    out = world.server.search(t_q, "honest")
+    out = world.server.search(t_q)
     resp = json.loads(json.dumps(out["response"]))
     return resp, user.verify(ctx, resp)
 
@@ -43,10 +49,10 @@ def test_owner_uses_precomputed_keywords():
     w.owners["A"].add_documents([doc])
     resp, rep = run(w, "mali", "A", '"machine verification" AND "textbook example"')
     assert rep["accepted"]
-    assert {r["ct"]["aad"]["doc"] for r in resp["R_ct"]} == {"X-01"}
+    assert {doc_of(r) for r in resp["R_ct"]} == {"X-01"}
     resp, rep = run(w, "mali", "A", "plain")            # in the text, not in W(d): not indexed
     assert rep["accepted"]
-    assert "X-01" not in {r["ct"]["aad"]["doc"] for r in resp["R_ct"]}
+    assert "X-01" not in {doc_of(r) for r in resp["R_ct"]}
 
 
 def _arxiv_available():

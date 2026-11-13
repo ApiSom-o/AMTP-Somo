@@ -9,11 +9,12 @@ Dataset: dataset-v4 (parts in datasets/arxiv/data_v4/, แตกด้วย pyt
   - insert pool 12,500 ไฟล์ต่อ domain (is_initial = 0) สำหรับ Experiment 3 / split-merge
   - keyword W(d) สกัดไว้แล้วด้วยโค้ด Phase 1 ของ AMTP (amtp/nlp.py: RAKE, kappa = 20 วลีต่อไฟล์, Norm แบบ idempotent)
     อยู่ในคอลัมน์ keywords ของ documents.csv
-  ทุก scheme รวมถึง AMTP เอง (scripts/import_dataset.py) ใช้ keyword ชุดนี้ตรง ๆ ไม่สกัดเอง -> W(d) เหมือนกันทุก scheme
-  เวลาสกัด keyword ของ AMTP รายงานแยกด้วย amtp_code/scripts/bench_extraction.py
+  ทุก scheme รวมถึง AMTP เอง (amtp_code/bench/) ใช้ keyword ชุดนี้ตรง ๆ ไม่สกัดเอง -> W(d) เหมือนกันทุก scheme
+  เวลาสกัด keyword ของ AMTP รายงานแยกด้วย amtp_code/bench/extraction.py
 
 วางข้อมูล: unpack.py แตกไว้ที่ <repo>/data/amtp_file_db_v4/  (หรือส่ง path ผ่าน --data / ตัวแปร AMTP_DATA)
-  dataset-v3 เดิม (4 x 50,000, kappa = 10): python3 datasets/arxiv/unpack.py --v3 -> data/amtp_file_db/ แล้วใช้ --data data/amtp_file_db
+  dataset-v3 เดิม (4 x 50,000, kappa = 10) ไม่มีใน NewAMTP แล้ว: ถ้ามีไฟล์ parts ของ v3 ใน datasets/arxiv/data/
+  ใช้ python3 datasets/arxiv/unpack.py --v3 -> data/amtp_file_db/ แล้วใส่ --data data/amtp_file_db
 
 การเลือก N เอกสาร (sample):
   เอา N / (จำนวน domain) ไฟล์แรกของแต่ละ domain ตามลำดับ doc_id (ไม่มีการสุ่ม)
@@ -296,6 +297,13 @@ def boolean_multi_queries():
     """Search 2.1: AND / OR / AND_of_OR / OR_of_AND, keywords from several domains.
     result_size_per_domain {domain: {files_per_domain: exact count}}"""
     return _jsonl("queries_boolean_multi.jsonl")
+
+
+def select_queries(qs, kqs=None, shapes=None, max_queries=0):
+    """The same query subset for every scheme: keep kQ in `kqs` and shape in `shapes` (None = all),
+    then the first max_queries (0 = all)."""
+    out = [q for q in qs if (not kqs or q["kQ"] in kqs) and (not shapes or q["shape"] in shapes)]
+    return out[:max_queries or None]
 
 
 def tamper_sets():

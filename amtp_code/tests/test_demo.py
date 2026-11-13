@@ -12,8 +12,14 @@ import json
 import pytest
 
 from amtp.core import boolean
+from amtp.core.crypto import unpack_ct
 from amtp.core.merkle import MerkleTree, multiverify
 from amtp.scenario import World
+
+
+def doc_of(r):
+    """Document id from the aad of a returned ciphertext (raw CT bytes, hex on the wire)."""
+    return unpack_ct(bytes.fromhex(r["ct"]))["aad"]["doc"]
 
 WORDS = ["insulin", "diabetes", "obesity", "glucose", "trial", "hypertension",
          "nurse", "budget", "cancer", "study"]
@@ -22,7 +28,7 @@ WORDS = ["insulin", "diabetes", "obesity", "glucose", "trial", "hypertension",
 def run(world, uid, domain, text, mode="honest"):
     user = world.users[uid]
     t_q, ctx = user.make_query(domain, text, world.anchor)
-    out = world.server.search(t_q, mode)
+    out = world.adversary.search(t_q, mode)
     if out["status"] != "ok":
         return out, None, None
     resp = json.loads(json.dumps(out["response"]))
@@ -59,7 +65,7 @@ def test_honest_results_equal_plaintext(world, domain):
     for q in queries():
         out, resp, rep = run(world, "nina", domain, q)
         assert rep["accepted"], (q, rep["failed"])
-        got = {r["ct"]["aad"]["doc"] for r in resp["R_ct"]}
+        got = {doc_of(r) for r in resp["R_ct"]}
         assert got == world.plaintext_answer(domain, q), q
 
 
@@ -104,7 +110,7 @@ def test_update_moves_epoch_and_new_file_is_found():
     assert w.anchor.latest("A")[0] == e_before + 1
     _, resp, rep = run(w, "mali", "A", "hypoglycemia")
     assert rep["accepted"]
-    assert {r["ct"]["aad"]["doc"] for r in resp["R_ct"]} == {"A-08"}
+    assert {doc_of(r) for r in resp["R_ct"]} == {"A-08"}
     _, _, stale = run(w, "mali", "A", "insulin", "stale")
     assert stale["failed"] == "anchor"
 
@@ -113,9 +119,11 @@ def test_split_keeps_threshold_rule():
     w = World()
     for _ in range(3):
         w.publish_next("A")
-    layout = w.owners["A"].layout
-    assert all(p.count <= layout.theta_max for p in layout.partitions)
-    assert 0 < layout.theta_min and 2 * layout.theta_min < layout.theta_max
+    owner = w.owners["A"]
+    pol = owner.policy
+    assert all(n <= pol.theta_max for n in owner.validator.live.values())
+    assert 0 < pol.theta_min and 2 * pol.theta_min < pol.theta_max
+    assert any(r[0] == "split" for r in owner.structure_log)       # the demo data does split
 
 
 def test_boolean_canonical_form():

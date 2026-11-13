@@ -5,9 +5,9 @@ import os
 import time
 
 from .core import boolean
-from .core.crypto import aes_gcm_decrypt, hmac_tag, unwrap, InvalidTag
+from .core.crypto import aes_gcm_decrypt, hmac_tag, unpack_ct, unwrap, InvalidTag
 from .dht import ciphertext_id
-from .core.hashing import H, enc
+from .core.hashing import H, enc_bq, lp, u64
 from .index import domain_root, gamma, imt_leaf, rho
 from .core.merkle import merkle_root, multiverify
 from .owner import keyword_key
@@ -23,6 +23,27 @@ CHECKS = [
     ("comp", "Exact Boolean result", "My own Eval(B_Q) gives exactly the returned files: none missing, none extra"),
     ("ct", "Ciphertext integrity", "Every returned file hashes to its cid"),
 ]
+
+
+def _ctx_bytes(field, value) -> bytes:
+    """Binary encoding of one query-context field, for the b_ctx comparison."""
+    if field == "B_Q":
+        return enc_bq(boolean.from_json(value))
+    if field == "epoch":
+        return u64(value)
+    if field == "nonce":
+        return bytes.fromhex(value)
+    if not isinstance(value, str):
+        raise ValueError("domain must be a string")
+    return lp(value)
+
+
+def _ct_bytes(r) -> bytes:
+    """The raw CT_d bytes of one R_ct entry (hex on the JSON wire)."""
+    try:
+        return bytes.fromhex(r["ct"])
+    except (TypeError, ValueError):
+        raise Reject("ct", f"file {str(r.get('cid'))[:8]} is not a well-formed ciphertext") from None
 
 
 class Reject(Exception):
@@ -65,16 +86,28 @@ class DataUser:
     def verify(self, ctx, resp):
         start = time.perf_counter()
         results, m_hat, failed = {}, None, None
+        phase, t = {}, time.perf_counter()
+
+        def lap(name):
+            nonlocal t
+            now = time.perf_counter()
+            phase[name] = (now - t) * 1e3
+            t = now
         try:
             m_h = self._check_ctx_anchor_idx(ctx, resp, results)
+            lap("idx")                                        # b_ctx, b_anchor, b_idx
             descs = self._check_papc(resp, m_h, results)
+            lap("papc")
             self._check_partitions(resp, m_h, descs, results)
+            lap("part")
             m_hat = self._check_result(ctx, resp, m_h, results)
+            lap("comp")
             self._check_ciphertexts(ctx, resp, results)
+            lap("ct")
         except Reject as r:
             results[r.check] = (False, r.detail)
             failed = r.check
-        except (KeyError, ValueError, TypeError, IndexError) as err:
+        except (KeyError, ValueError, TypeError, IndexError, OverflowError, AttributeError) as err:
             # Malformed response: reject at the first check not yet passed
             failed = next(k for k, *_ in CHECKS if k not in results)
             results[failed] = (False, f"malformed evidence ({type(err).__name__})")
@@ -85,12 +118,12 @@ class DataUser:
                               "ok": ok, "detail": detail})
         return {"accepted": failed is None, "failed": failed, "checks": checklist,
                 "M_hat": sorted(m_hat) if m_hat is not None else None,
-                "verify_ms": round((time.perf_counter() - start) * 1000, 2)}
+                "verify_ms": round((time.perf_counter() - start) * 1000, 2), "phase_ms": phase}
 
     def _check_ctx_anchor_idx(self, ctx, resp, results):
         # b_ctx
         for field in ("domain", "epoch", "B_Q", "nonce"):
-            if enc(resp[field]) != enc(ctx[field]):
+            if _ctx_bytes(field, resp[field]) != _ctx_bytes(field, ctx[field]):
                 raise Reject("ctx", f"{field} differs from my query "
                                     f"(got {str(resp[field])[:24]}, expected {str(ctx[field])[:24]})")
         results["ctx"] = (True, f"domain {ctx['domain']}, epoch {ctx['epoch']}, nonce matches")
@@ -112,6 +145,9 @@ class DataUser:
         m_h, absent = {}, 0
         for e in ev:
             h = e["h"]
+            if e["status"] not in ("present", "absent"):
+                raise Reject("idx", f"unknown evidence status {str(e['status'])[:16]!r}: "
+                                    "every keyword must be proven present or absent")
             if e["status"] == "absent":
                 lo = e["lo"]
                 lo_h, lo_next = bytes.fromhex(lo["h"]), bytes.fromhex(lo["next"])
@@ -155,7 +191,7 @@ class DataUser:
         r_idx = bytes.fromhex(resp["R_idx"])
         n_ok = 0
         for e in resp["proof"]["evidence"]:
-            if e["status"] != "present":
+            if e["status"] == "absent":          # already proven by the non-membership check
                 continue
             gammas = []
             for pid, comp in e["L"]:
@@ -227,9 +263,14 @@ class DataUser:
 
     def _check_ciphertexts(self, ctx, resp, results):
         for r in resp["R_ct"]:
-            if ciphertext_id(r["ct"]).hex() != r["cid"]:
+            ct = _ct_bytes(r)
+            if ciphertext_id(ct).hex() != r["cid"]:
                 raise Reject("ct", f"file {r['cid'][:8]} was modified: H(CT) ≠ cid")
-            if r["ct"]["aad"].get("domain") != ctx["domain"]:
+            try:
+                aad = unpack_ct(ct)["aad"]
+            except ValueError:
+                raise Reject("ct", f"file {r['cid'][:8]} is not a well-formed ciphertext") from None
+            if aad.get("domain") != ctx["domain"]:
                 raise Reject("ct", "file belongs to another domain")
         results["ct"] = (True, f"all {len(resp['R_ct'])} hash(es) match")
 
@@ -237,7 +278,7 @@ class DataUser:
     def decrypt(self, resp):
         out = []
         for r in resp["R_ct"]:
-            ct = r["ct"]
+            ct = unpack_ct(_ct_bytes(r))          # already checked by b_ct before decryption
             item = {"cid": r["cid"], "pid": r["pid"], "loc": r["loc"],
                     "policy": ct["aad"]["policy"], "doc": ct["aad"]["doc"]}
             k_d = unwrap(ct["CK"], self.attr_keys)
@@ -245,7 +286,7 @@ class DataUser:
                 item["status"] = "locked"
             else:
                 try:
-                    doc = json.loads(aes_gcm_decrypt(k_d, ct["E"], enc(ct["aad"])))
+                    doc = json.loads(aes_gcm_decrypt(k_d, ct["E"], ct["aad_b"]))
                     item.update(status="open", title=doc["title"], body=doc["body"])
                 except InvalidTag:
                     item["status"] = "decrypt_error"
