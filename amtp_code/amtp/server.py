@@ -8,12 +8,12 @@ import bisect
 import copy
 import time
 
-from . import boolean
-from .crypto import hmac_ok
+from .core import boolean
+from .core.crypto import hmac_ok
 from .dht import DHT, StorageError
-from .hashing import H, enc
+from .core.hashing import H, enc
 from .index import EMPTY_SLOT, SENTINEL_LO
-from .merkle import MerkleTree
+from .core.merkle import MerkleTree
 
 ATTACKS = {
     "honest": "Honest server",

@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from amtp import boolean
+from amtp.core import boolean
 from amtp.nlp import normalise_query_term, phase1_keywords
 from amtp.scenario import World
 
@@ -61,7 +61,7 @@ def _arxiv_available():
 @pytest.mark.skipif(not _arxiv_available(), reason="arXiv dataset not unpacked (python3 datasets/arxiv/unpack.py)")
 def test_arxiv_workload_matches_documents_csv():
     from bench.workload import arxiv_docs, arxiv_loader
-    from amtp.hashing import H
+    from amtp.core.hashing import H
     ds = arxiv_loader()
     docs = arxiv_docs(400, buckets=16, extra=40)
     ref = ds.sample(400) + ds.insert_pool()[:40]

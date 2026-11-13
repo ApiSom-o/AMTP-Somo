@@ -11,8 +11,8 @@ import json
 
 import pytest
 
-from amtp import boolean
-from amtp.merkle import MerkleTree, multiverify
+from amtp.core import boolean
+from amtp.core.merkle import MerkleTree, multiverify
 from amtp.scenario import World
 
 WORDS = ["insulin", "diabetes", "obesity", "glucose", "trial", "hypertension",

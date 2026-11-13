@@ -4,9 +4,9 @@ import random
 
 import pytest
 
-from amtp import boolean
+from amtp.core import boolean
 from amtp.engine import Engine
-from amtp.hashing import H
+from amtp.core.hashing import H
 from amtp.server import build_response
 from amtp.user import DataUser
 from amtp.variants import AdaptivePolicy, GlobalPolicy, StaticPolicy

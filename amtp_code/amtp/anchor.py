@@ -8,9 +8,9 @@ The prototype would deploy this logic as a Solidity contract on a local chain.
 """
 from dataclasses import dataclass
 
-from .crypto import sig_ok
-from .hashing import H, enc
-from .merkle import merkle_root
+from .core.crypto import sig_ok
+from .core.hashing import H, enc
+from .core.merkle import merkle_root
 
 
 def transition_message(domain, epoch, r_d: bytes, prev: bytes) -> bytes:

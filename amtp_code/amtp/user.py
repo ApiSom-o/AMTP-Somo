@@ -4,12 +4,12 @@ import json
 import os
 import time
 
-from . import boolean
-from .crypto import aes_gcm_decrypt, hmac_tag, unwrap, InvalidTag
+from .core import boolean
+from .core.crypto import aes_gcm_decrypt, hmac_tag, unwrap, InvalidTag
 from .dht import ciphertext_id
-from .hashing import H, enc
+from .core.hashing import H, enc
 from .index import domain_root, gamma, imt_leaf, rho
-from .merkle import merkle_root, multiverify
+from .core.merkle import merkle_root, multiverify
 from .owner import keyword_key
 from .server import query_digest
 

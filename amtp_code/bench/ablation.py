@@ -25,7 +25,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from amtp import boolean                                         # noqa: E402
+from amtp.core import boolean                                    # noqa: E402
 from amtp.dht import DHT                                          # noqa: E402
 from amtp.engine import Engine                                    # noqa: E402
 from amtp.server import build_response                            # noqa: E402

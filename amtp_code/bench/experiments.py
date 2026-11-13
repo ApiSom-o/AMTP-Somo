@@ -52,12 +52,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from amtp import boolean                                         # noqa: E402
+from amtp.core import boolean                                    # noqa: E402
 from amtp.anchor import RootAnchor, transition_message           # noqa: E402
-from amtp.crypto import AttributeAuthority, Signer, aes_gcm_encrypt   # noqa: E402
+from amtp.core.crypto import AttributeAuthority, Signer, aes_gcm_encrypt   # noqa: E402
 from amtp.dht import ciphertext_id                               # noqa: E402
 from amtp.engine import Engine                                   # noqa: E402
-from amtp.hashing import HashCounter, enc                        # noqa: E402
+from amtp.core.hashing import HashCounter, enc                   # noqa: E402
 from amtp.owner import DomainKeys, keyword_key                   # noqa: E402
 from amtp.server import CloudServer, build_response              # noqa: E402
 from amtp.user import DataUser, Reject                           # noqa: E402

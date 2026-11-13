@@ -18,10 +18,10 @@ import bisect
 import time
 from collections import Counter
 
-from .hashing import H, HashCounter
+from .core.hashing import H, HashCounter
 from .index import (EMPTY_SLOT, IMT_EMPTY, SENTINEL_LO, ZERO, DomainState, Partition,
                     domain_root, gamma, imt_leaf, imt_next, rho, sorted_imt_layout)
-from .merkle import MerkleTree
+from .core.merkle import MerkleTree
 
 
 class Engine:
