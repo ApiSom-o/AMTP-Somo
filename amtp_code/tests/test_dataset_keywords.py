@@ -24,7 +24,7 @@ def doc_of(r):
 def run(world, uid, domain, text):
     user = world.users[uid]
     t_q, ctx = user.make_query(domain, text, world.anchor)
-    out = world.server.search(t_q, "honest")
+    out = world.server.search(t_q)
     resp = json.loads(json.dumps(out["response"]))
     return resp, user.verify(ctx, resp)
 

@@ -3,6 +3,7 @@
 All names and records are invented for the demo. The real experiments use
 the Enron e-mail corpus instead.
 """
+from .adversary import Adversary
 from .anchor import RootAnchor
 from .core.crypto import AttributeAuthority
 from .owner import DataOwner, DomainKeys
@@ -90,6 +91,7 @@ class World:
         self.authority = AttributeAuthority()
         self.anchor = RootAnchor()
         self.server = CloudServer()
+        self.adversary = Adversary(self.server)     # demo and tests only
         self.keys = {d: DomainKeys() for d in DOMAINS}
         self.owners = {}
         self.pending = {d: [_doc(t) for t in PENDING[d]] for d in DOMAINS}

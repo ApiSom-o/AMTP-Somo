@@ -59,7 +59,8 @@ from amtp.dht import ciphertext_id                               # noqa: E402
 from amtp.engine import Engine                                   # noqa: E402
 from amtp.core.hashing import HashCounter, enc                   # noqa: E402
 from amtp.owner import DomainKeys, keyword_key                   # noqa: E402
-from amtp.server import CloudServer, build_response, flip_one_byte   # noqa: E402
+from amtp.adversary import flip_one_byte                         # noqa: E402
+from amtp.server import CloudServer, build_response              # noqa: E402
 from amtp.user import DataUser, Reject                           # noqa: E402
 from amtp.variants import AdaptivePolicy, StaticPolicy           # noqa: E402
 from bench.workload import REPO_ROOT, _primary_categories, arxiv_loader   # noqa: E402

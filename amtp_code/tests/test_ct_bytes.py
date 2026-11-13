@@ -8,7 +8,7 @@ from amtp.core.crypto import CT_MAGIC, make_ct, unpack_ct
 from amtp.core.hashing import H
 from amtp.dht import DHT, StorageError, ciphertext_id
 from amtp.scenario import World
-from amtp.server import flip_one_byte
+from amtp.adversary import flip_one_byte
 
 
 def test_ct_is_bytes_and_cid_hashes_the_raw_bytes():

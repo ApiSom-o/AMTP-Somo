@@ -28,7 +28,7 @@ WORDS = ["insulin", "diabetes", "obesity", "glucose", "trial", "hypertension",
 def run(world, uid, domain, text, mode="honest"):
     user = world.users[uid]
     t_q, ctx = user.make_query(domain, text, world.anchor)
-    out = world.server.search(t_q, mode)
+    out = world.adversary.search(t_q, mode)
     if out["status"] != "ok":
         return out, None, None
     resp = json.loads(json.dumps(out["response"]))

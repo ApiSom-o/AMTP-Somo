@@ -4,7 +4,6 @@ Everything here is computed by the Data Owner and handed to the Cloud Server.
 For a clear demo, each epoch's state is rebuilt from scratch; the real
 prototype would recompute only the dirty Merkle paths.
 """
-import copy
 import re
 from dataclasses import dataclass, field
 
@@ -140,46 +139,3 @@ class DomainState:
 def domain_root(domain: str, epoch: int, r_part: bytes, r_idx: bytes) -> bytes:
     """R_D^(e) = H(i ‖ e ‖ R^part ‖ R^idx)"""
     return H(domain, epoch, r_part, r_idx)
-
-
-class PartitionLayout:
-    """Owner-side partition bookkeeping with occupancy-driven split (Phase 3).
-
-    Merge (n < θ_min) is not needed for this user-side demo because it only adds
-    documents; the constraint 0 < θ_min and 2·θ_min < θ_max is still enforced."""
-
-    def __init__(self, domain: str, theta_min: int, theta_max: int):
-        if not (0 < theta_min and 2 * theta_min < theta_max):
-            raise ValueError("need 0 < θ_min and 2·θ_min < θ_max")
-        self.domain = domain
-        self.theta_min, self.theta_max = theta_min, theta_max
-        self._counter = 0
-        self.partitions = [self._fresh([])]
-        self.log = []
-
-    def _fresh(self, cids) -> Partition:
-        self._counter += 1
-        pid = H("pid", self.domain, self._counter).hex()[:12]
-        return Partition(pid=pid, v=0, slots=list(cids))
-
-    def snapshot(self):
-        return copy.deepcopy(self.partitions)
-
-    def insert(self, cid: bytes):
-        target = min(self.partitions, key=lambda p: p.count)
-        if EMPTY_SLOT in target.slots:
-            target.slots[target.slots.index(EMPTY_SLOT)] = cid
-        else:
-            target.slots.append(cid)
-        target.v += 1
-        if target.count > self.theta_max:
-            self._split(target)
-
-    def _split(self, p: Partition):
-        live = [c for c in p.slots if c != EMPTY_SLOT]
-        half = len(live) // 2
-        left, right = self._fresh(live[:half]), self._fresh(live[half:])
-        i = self.partitions.index(p)
-        self.partitions[i:i + 1] = [left, right]
-        self.log.append(f"split {p.pid} ({len(live)} docs > θ_max={self.theta_max}) "
-                        f"-> {left.pid} + {right.pid}")
