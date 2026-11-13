@@ -11,7 +11,7 @@ Multi-word keywords (e.g. RAKE phrases of the arXiv dataset) are written in doub
 """
 import re
 
-from .hashing import enc
+from .hashing import _enc_node
 
 _TOKEN = re.compile(r"\s*(\(|\)|&&|\|\||\"[^\"]+\"|[A-Za-z0-9_\-]+)")
 
@@ -85,17 +85,25 @@ def _parse_atom(tokens, pos):
 
 
 def canonical(ast):
-    """Flatten nested same operators, drop duplicates, sort children.
-    Two expressions with the same meaning-by-structure get the same encoding."""
+    """Canonical B_Q: flatten nested same operators, drop duplicate children, apply absorption
+    (X AND (X OR Y) = X, X OR (X AND Y) = X), collapse one-child nodes and sort children by
+    their binary encoding. Expressions that differ only by order, grouping, repetition or
+    absorption get the same tree, hence the same Enc(B_Q) and the same query digest."""
     if ast[0] == "leaf":
-        return ast
+        return ("leaf", ast[1])
     op = ast[0]
     flat = []
     for child in (canonical(c) for c in ast[1]):
         flat.extend(child[1] if child[0] == op else [child])
-    unique = {enc(c): c for c in flat}
-    children = [unique[k] for k in sorted(unique)]
+    unique = {_key(c): c for c in flat}
+    absorbed = {k for k, c in unique.items()
+                if c[0] != "leaf" and any(_key(g) in unique and _key(g) != k for g in c[1])}
+    children = [unique[k] for k in sorted(unique) if k not in absorbed]
     return children[0] if len(children) == 1 else (op, children)
+
+
+def _key(ast) -> bytes:
+    return _enc_node(ast)
 
 
 def leaves(ast) -> set:

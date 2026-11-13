@@ -9,12 +9,13 @@ The prototype would deploy this logic as a Solidity contract on a local chain.
 from dataclasses import dataclass
 
 from .core.crypto import sig_ok
-from .core.hashing import H, enc
+from .core.hashing import H, TAG_TRANSITION, lp
 from .core.merkle import merkle_root
 
 
 def transition_message(domain, epoch, r_d: bytes, prev: bytes) -> bytes:
-    return enc({"domain": domain, "epoch": epoch, "R_D": r_d, "prev": prev})
+    """The bytes the owner signs for a root transition: tag ‖ i ‖ e ‖ R_D ‖ R_prev (length-prefixed)."""
+    return lp(TAG_TRANSITION, domain, epoch, r_d, prev)
 
 
 @dataclass

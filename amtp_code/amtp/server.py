@@ -11,7 +11,7 @@ import time
 from .core import boolean
 from .core.crypto import hmac_ok
 from .dht import DHT, StorageError
-from .core.hashing import H, enc
+from .core.hashing import H, TAG_QUERY, enc_bq
 from .index import EMPTY_SLOT, SENTINEL_LO
 from .core.merkle import MerkleTree
 
@@ -37,8 +37,21 @@ def flip_one_byte(ct_hex: str, index: int = -1) -> str:
 
 
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
-    """H(i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η) — the message under τ_Q."""
-    return H(domain, enc(b_q), epoch, t, bytes.fromhex(nonce_hex))
+    """H(tag ‖ i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η): the message under τ_Q, all fields binary."""
+    return H(TAG_QUERY, domain, enc_bq(boolean.from_json(b_q)), epoch, t, bytes.fromhex(nonce_hex))
+
+
+def bq_error(b_q):
+    """None if B_Q is a canonical AND/OR tree over 32-byte hex query keys, else the reason."""
+    try:
+        ast = boolean.from_json(b_q)
+        if any(len(bytes.fromhex(h)) != 32 for h in boolean.leaves(ast)):
+            return "query keys must be 32-byte values"
+        if enc_bq(boolean.canonical(ast)) != enc_bq(ast):
+            return "B_Q is not in canonical form"
+    except (TypeError, ValueError, IndexError, KeyError):
+        return "B_Q is malformed"
+    return None
 
 
 class CloudServer:
@@ -91,6 +104,9 @@ class CloudServer:
         domain = t_q.get("domain")
         if domain not in self.states:
             return "unknown domain"
+        reason = bq_error(t_q["B_Q"])
+        if reason:
+            return reason
         msg = query_digest(domain, t_q["B_Q"], t_q["epoch"], t_q["t"], t_q["nonce"])
         if not hmac_ok(self.query_keys[domain], msg, bytes.fromhex(t_q["tau"])):
             return "query tag τ_Q is invalid (user has no query key for this domain)"

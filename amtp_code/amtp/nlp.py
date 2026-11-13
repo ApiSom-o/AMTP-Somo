@@ -204,6 +204,11 @@ def phase1_keywords(text: str) -> list:
     return extract_keywords(text, THETA_DOC, L_CH, L_OV, KAPPA, MAX_WORDS)[0]
 
 
-def normalise_query_term(q: str) -> str:
-    """Norm applied to a query keyword (same rules as at upload; idempotent on W(d))."""
-    return " ".join(t for t in tokenize(q) if t is not None)
+def norm(w: str) -> str:
+    """Norm(w): the single keyword normalisation used at upload (W(d)) and at query time.
+    Tokenise, lowercase, drop possessive 's, light lemmatisation, join with one space.
+    Idempotent, so a keyword already in W(d) maps to itself."""
+    return " ".join(t for t in tokenize(w) if t is not None)
+
+
+normalise_query_term = norm          # older name, same function

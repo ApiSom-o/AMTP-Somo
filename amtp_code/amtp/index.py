@@ -8,7 +8,7 @@ import copy
 import re
 from dataclasses import dataclass, field
 
-from .core.hashing import H, enc
+from .core.hashing import H, enc_posting
 from .core.merkle import MerkleTree, merkle_root
 
 EMPTY_SLOT = b""
@@ -44,8 +44,9 @@ class Partition:
 
 
 def gamma(pid: str, v: int, component) -> bytes:
-    """γ_{w,j} = H(PID ‖ v ‖ H(Enc(L_{w,j})))"""
-    return H(pid, v, H(enc(component)))
+    """γ_{w,j} = H(PID ‖ v ‖ H(Enc(L_{w,j}))) with the binary posting encoding enc_posting
+    (entries (cid, ℓ) in slot order; cid as bytes or hex)."""
+    return H(pid, v, H(enc_posting(component)))
 
 
 def rho(h: bytes, n_sel: int, r_post: bytes) -> bytes:

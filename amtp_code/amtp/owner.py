@@ -6,6 +6,7 @@ from .core.crypto import Signer, keyword_cipher, make_ct
 from .dht import ciphertext_id
 from .core.hashing import H, enc
 from .index import DomainState, PartitionLayout, extract_keywords
+from .nlp import norm
 
 
 class DomainKeys:
@@ -19,8 +20,9 @@ class DomainKeys:
 
 
 def keyword_key(k_s: bytes, word: str) -> bytes:
-    """h_w = H(C_w) with C_w = DEnc_{K_s}(w)"""
-    return H(keyword_cipher(k_s, word))
+    """h_w = H(C_w) with C_w = DEnc_{K_s}(Norm(w)). Every keyword, at upload and in a query,
+    goes through this one function, so index and query use the same Norm."""
+    return H(keyword_cipher(k_s, norm(word)))
 
 
 class DataOwner:
@@ -44,9 +46,10 @@ class DataOwner:
         # W(d): taken from the shared dataset (documents.csv) when given, so AMTP indexes exactly
         # the keyword sets every baseline uses; otherwise the demo extractor is applied.
         if doc.get("keywords") is not None:
-            keywords = {k.strip() for k in doc["keywords"] if k and k.strip()}
+            keywords = {norm(k) for k in doc["keywords"] if k and k.strip()}
         else:
-            keywords = extract_keywords(doc["title"] + " " + doc["body"])
+            keywords = {norm(k) for k in extract_keywords(doc["title"] + " " + doc["body"])}
+        keywords.discard("")
         return ct, ciphertext_id(ct), {keyword_key(self.keys.k_s, w) for w in keywords}
 
     def add_documents(self, docs):

@@ -90,8 +90,9 @@ def unpack_ct(ct: bytes) -> dict:
 
 
 def keyword_cipher(k_s: bytes, word: str) -> bytes:
-    """C_w = DEnc_{K_s}(Norm(w)). Same word + same key -> same ciphertext."""
-    return AESSIV(k_s).encrypt(word.strip().lower().encode(), None)
+    """C_w = DEnc_{K_s}(w) for an already normalised keyword (Norm is applied by
+    owner.keyword_key). Same word + same key -> same ciphertext."""
+    return AESSIV(k_s).encrypt(word.encode(), None)
 
 
 def hmac_tag(key: bytes, msg: bytes) -> bytes:

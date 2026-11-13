@@ -7,7 +7,7 @@ import time
 from .core import boolean
 from .core.crypto import aes_gcm_decrypt, hmac_tag, unpack_ct, unwrap, InvalidTag
 from .dht import ciphertext_id
-from .core.hashing import H, enc
+from .core.hashing import H, enc_bq, lp, u64
 from .index import domain_root, gamma, imt_leaf, rho
 from .core.merkle import merkle_root, multiverify
 from .owner import keyword_key
@@ -23,6 +23,19 @@ CHECKS = [
     ("comp", "Exact Boolean result", "My own Eval(B_Q) gives exactly the returned files: none missing, none extra"),
     ("ct", "Ciphertext integrity", "Every returned file hashes to its cid"),
 ]
+
+
+def _ctx_bytes(field, value) -> bytes:
+    """Binary encoding of one query-context field, for the b_ctx comparison."""
+    if field == "B_Q":
+        return enc_bq(boolean.from_json(value))
+    if field == "epoch":
+        return u64(value)
+    if field == "nonce":
+        return bytes.fromhex(value)
+    if not isinstance(value, str):
+        raise ValueError("domain must be a string")
+    return lp(value)
 
 
 def _ct_bytes(r) -> bytes:
@@ -98,7 +111,7 @@ class DataUser:
     def _check_ctx_anchor_idx(self, ctx, resp, results):
         # b_ctx
         for field in ("domain", "epoch", "B_Q", "nonce"):
-            if enc(resp[field]) != enc(ctx[field]):
+            if _ctx_bytes(field, resp[field]) != _ctx_bytes(field, ctx[field]):
                 raise Reject("ctx", f"{field} differs from my query "
                                     f"(got {str(resp[field])[:24]}, expected {str(ctx[field])[:24]})")
         results["ctx"] = (True, f"domain {ctx['domain']}, epoch {ctx['epoch']}, nonce matches")

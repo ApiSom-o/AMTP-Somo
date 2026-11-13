@@ -121,9 +121,10 @@ class World:
         from .index import extract_keywords
         published = [_doc(t) for t in DOCS[domain] + PENDING[domain]
                      if t[0] not in {p["id"] for p in self.pending[domain]}]
+        from .nlp import norm
         sets = {}
         ast = boolean.parse(text)
         for w in boolean.leaves(ast):
             sets[w] = {d["id"] for d in published
-                       if w in extract_keywords(d["title"] + " " + d["body"])}
+                       if norm(w) in {norm(k) for k in extract_keywords(d["title"] + " " + d["body"])}}
         return boolean.evaluate(ast, sets)
