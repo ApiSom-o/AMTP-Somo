@@ -108,6 +108,11 @@ Two pieces sit outside the core:
 
 ### 4.2 Data flow
 
+**Epoch.** One epoch is one batch of `b` logical operations (`ops_per_epoch`, default `b = 1`): the
+Cloud Server applies the `b` signed requests, adapts and repairs once, and proposes one candidate
+root; the owner's Validator checks it once and signs one `σ_root`; the Root Anchor advances `e*` by
+one. `b` is a benchmark parameter and is recorded with every update result.
+
 Update path (owner and cloud, Phases 1 to 3, one epoch):
 
 ```
@@ -195,7 +200,7 @@ say the same thing.
 | ID | Change | Type |
 |---|---|---|
 | D1 | Remove the B+ tree and the Cuckoo filter from the indexing and query figures. Only the IMT is evidence; the server may use any lookup structure. | figure + text |
-| D2 | IMT leaf is `I_w = H(h_w ‖ ρ_w ‖ next(h_w))` (eq. 20). Non-membership is one bracketing leaf: `h_lo < h < next(h_lo)`. | paper behind code |
+| D2 | IMT leaf is `I_w = H(h_w ‖ ρ_w ‖ next(h_w))` (eq. 20). Non-membership is one bracketing leaf: `h_lo < h < next(h_lo)`. | done in code; paper text in `IMT_UPDATE_COST.md` §6 |
 | D3 | Commitment runs on the cloud server; the owner's Validator replays Δ on dirty paths at `O(|W_aff| · log n)` instead of re-deriving everything. | missing in code |
 | D4 | Draw Phases 2 and 3 as one pass: place → adapt → repair → one candidate root → one validation → one anchor (one epoch). | figure only |
 | D5 | Either state the real `W_aff` (with `v` inside γ, a version bump re-commits every keyword in the partition) or move `v` out of γ (= B4). | protocol change |
@@ -237,7 +242,7 @@ Stage 2, in order (one pull request per step is fine):
 | B2 | high | `CloudServer.store_state`, `CloudServer.search` | The server keeps every epoch's full state forever and deep-copies every honest response (only for the replay demo). | Keep the current epoch, plus the previous one only when the adversary plug-in is loaded. | code only | 3 |
 | B3 | critical | `build_response` (ASPA over `M_cov = ⋃ M_h`), `user._check_papc` | Every proof carries the full posting list of every query keyword, so an AND query costs as much as its most common keyword. Most likely reason AMTP lost to Chen et al. | Partition-pruned PAPC: make R^post leaves `H(PID ‖ γ)`; for AND, open components only in partitions shared by every keyword, send the rest as γ hashes. Process keywords rarest first. | protocol | 4 |
 | B4 | high | `Engine.commit` (version bump marks every key in `keys_in[pid]` dirty), `index.gamma` | `v` is inside every γ, so changing one file re-commits every keyword of its partition (up to ≈ θ_max × 20) instead of the file's 20. | Bind `v` only at `A = H(PID ‖ v ‖ R_P)`; drop it from γ. Freshness argument must be rechecked. | protocol | 4 |
-| B5 | medium | `hashing.enc`, `index.gamma`, `dht.ciphertext_id`, JSON + hex responses | Canonical JSON with hex strings on the hashing hot path; cids hash a hex-expanded JSON ciphertext. | `core/encoding.py`: fixed-width binary encoding, `cid = H(raw CT bytes)`, CBOR/msgpack on the wire. Same rule for the baselines (R4). | code only | 3 |
+| B5 | medium | `hashing.enc`, `index.gamma`, `dht.ciphertext_id`, JSON + hex responses | Canonical JSON with hex strings on the hashing hot path; cids hash a hex-expanded JSON ciphertext. | `core/encoding.py`: fixed-width binary encoding, `cid = H(raw CT bytes)`, CBOR/msgpack on the wire. Same rule for the baselines (R4). | **done**: tagged binary encodings in `core/hashing.py` (γ, query digest, transition message, B_Q), `cid = H(raw CT bytes)`; sizes counted in binary for every scheme by `baselines/wire_sizes.py` (the in-process JSON transport is not timed) |
 | B6 | medium | `DHT.get` | Every read deep-copies and re-hashes the ciphertext; the user hashes it again in `b_ct`. | Immutable bytes, no copy; verify-on-read optional (storage-loss demo). | code only | 3 |
 | B7 | high | `Engine.comp`, `fwd`, `keys_in`, `gam` | ≈ 10M posting entries at 500k files as nested dicts keyed by 32-byte `bytes`: several GB before B1's copy. | Integer ids for cids and keywords at ingest; postings as integer arrays per (keyword, partition). | code only | 3 |
 | B8 | low | `merkle.multiverify` (`remaining.pop(0)`), `AdaptivePolicy.adapt` (`queue.pop(0)`, partner scan over all partitions), `Engine._rebuild_part_tree`, `Engine._post_root` | Small quadratic or full-rebuild spots that grow with small θ or large proofs. | Index pointer; `deque` + heap keyed by `(live, PID)`; free-position trick (as in the IMT) for the partition tree and R^post trees. | code only | 3 |
@@ -287,6 +292,17 @@ Advisor's plan (dataset-v4, 4 domains × 125,000 files, κ = 20), as run by `scr
 | `theta` | θ sweep: query vs update cost | AMTP |
 | `splitmerge` | split / merge under skewed growth, θ_max = 64 / 128 / 256 | AMTP, Static-MT, Global-MT |
 
+**Proof and response size (one rule for every scheme, `baselines/wire_sizes.py`).** Sizes are
+counted in binary, never as JSON or hex text: every hash value, Merkle node, HMAC / PRF tag and
+hash-sized identifier (cid) is 32 B; every number (count, position, slot, epoch, version, file or
+partition identifier) is 8 B; a nonce is 16 B; ciphertexts, group elements and other byte strings
+count their real length. `proof_bytes` is the authentication data the user needs to verify the
+result, without the files; `response_bytes` is everything the server returns, i.e. `proof_bytes`
+plus every returned file (identifier and ciphertext) plus any header or signature. A scheme that
+does not model file encryption (Chen et al. returns only encrypted bitmaps) is charged the
+standard AES-GCM ciphertext of each returned file (plaintext + 28 B), so every `response_bytes`
+includes the files the user receives.
+
 What the figures must bring out, beyond time: AMTP **never accepts a wrong result** (every tamper
 is detected), and it **identifies which files are wrong** (`full_check`), while keeping the
 advisor's parameters on the x-axes.
@@ -327,7 +343,7 @@ bash scripts/aws_run_all.sh check                          # dataset + tests + b
 | Symbol | Meaning |
 |---|---|
 | `i`, `D_i` | domain |
-| `e`, `e*` | epoch; latest finalized epoch on the anchor |
+| `e`, `e*` | epoch (one batch of `b` operations, default `b = 1`); latest finalized epoch on the anchor |
 | `h_w = H(DEnc_Ks(w))` | protected keyword token |
 | `cid = H(CT)` | ciphertext id |
 | `P_j`, `PID`, `v`, `ℓ` | partition, its id, its version, a slot in it |

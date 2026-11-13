@@ -62,7 +62,7 @@ Contributions:
 | Document maps | `Doc(id)=cid`, `Loc(cid)=(PID, ℓ)`, `Fwd(cid)={h_w}` (12) |
 | Postings | `L_w = [(PID, L_w,j)]` over `Sel(h_w)` (14–16), canonical order, no duplicates, no empty components |
 | **PAPC** | `γ_w,j = H(PID ‖ v ‖ H(Enc(L_w,j)))` (17), `R^post_w = MerkleRoot([γ_w,j])` (18), `σ_w = H(h_w ‖ |Sel(h_w)| ‖ R^post_w)` (19) |
-| **IMT** | leaves `I_w = H(h_w ‖ σ_w)` in key order with sentinels `I_lo`, `I_hi` → `R^idx_Di` (20); non-membership = adjacent bracketing leaves |
+| **IMT** | indexed Merkle tree: leaves `I_w = H(h_w ‖ σ_w ‖ next(h_w))`, `next(h_w)` = smallest indexed key above `h_w` (`h_hi` for the largest), lower sentinel `I_lo` → `R^idx_Di` (20). Leaf positions are not sorted (a new key is appended or reuses a freed position). Non-membership = **one** leaf `h_lo` with `h_lo < h < next(h_lo)`. The code does this; the paper's eq. 20 text is in `IMT_UPDATE_COST.md` §6 |
 | **Domain Root** | `R_Di^(e) = H(i ‖ e ‖ R^part_Di ‖ R^idx_Di)` (1, 26); `R^part = MerkleRoot([A_i,j])` in PID order (25) |
 | Global Root | `R_G = MerkleRoot(R_D1 … R_Dn)` — audit only, **not needed** for query verification |
 | AUDC | `Δ = H(i ‖ e' ‖ H(U_op) ‖ H(Aff) ‖ R^(e) ‖ R^(e'))` (27) |
