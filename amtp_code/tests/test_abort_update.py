@@ -7,14 +7,23 @@ against the current predecessor").
   3. ciphertexts stored only for a discarded candidate are removed; deleted ones are kept
   4. random histories with splits, merges and random rejections: after every rollback the engine
      equals its state before the candidate, and every accepted epoch is validated and anchored
+  5. the undo log changes no root: an engine with the log (and rollbacks in between) and one
+     without it give the same R_D at every epoch for the same operations
+  6. the Root Anchor's own checks (wrong epoch, wrong Δ / signature) reject, and the CS rolls back
+  7. after an abort, a Data User's query is accepted (all seven checks) and returns the plaintext
+     ground truth of the finalized snapshot
 """
+import json
 import copy
 import random
 
 import pytest
 
 from amtp.core.hashing import H
+from amtp.engine import Engine
+from amtp.scenario import World
 from amtp.validator import Invalid
+from amtp.variants import AdaptivePolicy
 from tests.test_update_protocol import make_owner, random_requests
 
 
@@ -47,6 +56,7 @@ def assert_finalized(owner):
     assert not eng.in_progress and not eng.pending_ops
     assert (eng.epoch, eng.R_D) == (e_star, r_star) == (owner.validator.epoch, owner.validator.R_D)
     assert owner.server.current("A").R_D == r_star
+    assert eng.snapshot().R_D == r_star                  # equals the full rebuild
     assert all(eng.cuckoo.might_contain(h) for h in eng.comp.keys())
     eng.comp.check()
 
@@ -177,3 +187,105 @@ def test_random_rejections_with_split_and_merge(seed):
     assert rejected and accepted
     full = eng.snapshot()
     assert full.R_D == eng.R_D
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_undo_log_changes_no_root(seed):
+    """Same operations into an engine with the undo log (plus discarded candidates in between)
+    and into one without it: the same R_D at every epoch and the same final state."""
+    rnd = random.Random(500 + seed)
+    plain = Engine("D", AdaptivePolicy(2, 2, 6))
+    logged = Engine("D", AdaptivePolicy(2, 2, 6))
+    vocab = [H("w", i) for i in range(40)]
+    live, nxt = [], 0
+    for _ in range(80):
+        ops = []
+        for _ in range(rnd.randint(1, 4)):
+            if live and rnd.random() < 0.4:
+                ops.append(("del", live.pop(rnd.randrange(len(live)))))
+            else:
+                ops.append(("ins", H("cid", nxt), set(rnd.sample(vocab, rnd.randint(1, 5))),
+                            rnd.randrange(2)))
+                nxt += 1
+        if rnd.random() < 0.3:                           # a candidate that gets rejected
+            junk = H("junk", nxt)
+            nxt += 1
+            logged.begin()
+            logged.insert(junk, set(rnd.sample(vocab, 3)), 0)
+            for op in ops:
+                if op[0] == "del":
+                    logged.delete(op[1])
+            logged.commit(evidence=True)
+            logged.rollback()
+        logged.begin()
+        for eng in (plain, logged):
+            for op in ops:
+                if op[0] == "ins":
+                    eng.insert(op[1], op[2], op[3])
+                else:
+                    eng.delete(op[1])
+        live += [op[1] for op in ops if op[0] == "ins"]
+        plain.commit()
+        logged.commit(evidence=True)
+        logged.accept()
+        assert logged.R_D == plain.R_D and logged.epoch == plain.epoch
+    assert engine_state(logged) == engine_state(plain)
+
+
+@pytest.mark.parametrize("change", ["epoch", "delta", "signature"])
+def test_root_anchor_rejection_rolls_back(monkeypatch, change):
+    """The anchor's own checks reject (no stub raising an error): e' != e* + 1, a Δ the
+    signature does not cover, or a signature by a key that is not the domain's owner."""
+    from amtp.core.crypto import Signer
+    owner, rnd, live, k = history(7)
+    eng = owner.server.engines["A"]
+    before = engine_state(eng)
+    reqs = random_requests(owner, rnd, 3, live, k)
+    real = owner.anchor.submit
+
+    def submit(domain, epoch, r_d, sig, delta, prev=None):
+        if change == "epoch":
+            epoch += 1
+        elif change == "delta":
+            delta = bytes(32)
+        else:
+            sig = Signer().sign(b"not the owner")
+        return real(domain, epoch, r_d, sig, delta, prev=prev)
+    monkeypatch.setattr(owner.anchor, "submit", submit)
+    with pytest.raises(ValueError):
+        owner.update(reqs)
+    assert engine_state(eng) == before
+    assert owner.anchor.latest("A") == (before["epoch"], before["R_D"])
+    monkeypatch.undo()
+    assert_finalized(owner)
+    owner.update(reqs)                                   # regenerated, validated, anchored
+    assert_finalized(owner)
+
+
+def _answer(w, user, domain, query):
+    t_q, ctx = user.make_query(domain, query, w.anchor)
+    out = w.server.search(t_q)
+    assert out["status"] == "ok"
+    rep = user.verify(ctx, json.loads(json.dumps(out["response"])))
+    assert rep["accepted"], rep["failed"]
+    got = {r["cid"] for r in out["response"]["R_ct"]}
+    owner = w.owners[domain]
+    want = {owner.doc[i].hex() for i in w.plaintext_answer(domain, query)}
+    assert got == want
+    return got, ctx["epoch"]
+
+
+@pytest.mark.parametrize("query", ["insulin OR diabetes", "insulin AND glucose", "obesity"])
+def test_query_after_abort_uses_the_finalized_snapshot(query):
+    w = World()
+    owner, user = w.owners["A"], w.users["mali"]
+    got0, e0 = _answer(w, user, "A", query)
+    new_doc = w.pending["A"][0]
+    prop = w.server.prepare_update("A", [owner.insert_request(new_doc)])
+    assert prop["epoch_new"] == e0 + 1
+    w.server.abort_update("A")                           # e.g. the Validator rejected it
+    got1, e1 = _answer(w, user, "A", query)
+    assert (got1, e1) == (got0, e0)
+    w.publish_next("A")                                  # the same document, properly finalized
+    got2, e2 = _answer(w, user, "A", query)
+    assert e2 == e0 + 1

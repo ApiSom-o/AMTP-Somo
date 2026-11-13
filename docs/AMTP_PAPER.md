@@ -178,4 +178,10 @@ These are places where the draft and the current code/data disagree or the draft
 7. **Rejected candidates.** A candidate rejected by the owner's Validator or the Root Anchor is discarded
    (`CloudServer.abort_update`, undo log in `Engine`) and the Cloud Server returns to the finalized
    predecessor, as Phase 2, Step 5 requires ("obsolete proposals must be regenerated against the current
-   predecessor"). Keeping the undo log costs about 5% of the server's update time.
+   predecessor"). The CS keeps an undo log of the working successor; writing it is part of every update,
+   so its cost is included in the reported update latency (`server_ms`, about 5% at N = 10k). Discarding
+   a candidate is not part of the measured updates (they are never rejected). Suggested paper sentence:
+   "The CS records an undo log while preparing a candidate, so a rejected candidate is discarded and the
+   CS returns to the finalized predecessor; the cost of this log is included in the update latency."
+   Tests: `amtp_code/tests/test_abort_update.py` (Validator and anchor rejections, roots unchanged by
+   the log, queries after an abort).
