@@ -52,7 +52,9 @@ def test_posting_encoding_rejects_bad_fields(bad):
         enc_posting(bad)
 
 
-def test_gamma_is_the_same_for_bytes_and_hex_cids():
+def test_gamma_is_the_same_for_bytes_and_hex_cids(monkeypatch):
+    import amtp.index
+    monkeypatch.setattr(amtp.index, "_GAMMA_V", True)     # the paper's γ (with v); without v: test_gamma_flag.py
     comp = [(CID[2], 3), (CID[3], 7)]
     assert gamma("P1", 4, comp) == gamma("P1", 4, [[c.hex(), s] for c, s in comp])
     assert gamma("P1", 4, comp) != gamma("P1", 5, comp) != gamma("P2", 4, comp)

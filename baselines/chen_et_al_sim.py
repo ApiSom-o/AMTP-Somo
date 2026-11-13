@@ -991,11 +991,15 @@ def suite_search1(args):
     (Chen รองรับ single / AND ซึ่งเป็นทุกรูปแบบของไฟล์นี้) ผลต้องเท่ากับ result_size และ ground truth"""
     D = dataset()
     qs = D.search_single_queries()
-    print(f"[search1] domains={args.s_domains} files/domain={args.fpd} queries={len(qs)}")
+    plan = D.search1_points(qs, args.fpd, args.fix, args.s1_kq, args.all_points)
+    print(f"[search1] domains={args.s_domains} files/domain={args.fpd} queries={len(qs)} "
+          f"points={sum(map(len, plan.values()))}")
     w = Writer("search_single", args.out)
     for dname in args.s_domains:
-        mine = [q for q in qs if q["domain"] == dname]
         for n in args.fpd:
+            mine = [q for q in plan[n] if q["domain"] == dname]
+            if not mine:
+                continue
             src = D.domain_docs(dname, n, args.data)
             inv = D.inverted_index(src)
             needed = {k for q in mine for k in q["keywords"]}
@@ -1397,6 +1401,9 @@ def main():
     ap.add_argument("--s-domains", nargs="+", default=list(Dm.DOMAINS), help="v4 single-domain suites: domain")
     ap.add_argument("--fpd", type=int, nargs="+", default=Dm.V4_SIZES, help="search1: จำนวนไฟล์ต่อ domain")
     ap.add_argument("--fix", type=int, default=Dm.V4_FIX, help="verify1: ไฟล์ต่อ domain")
+    ap.add_argument("--s1-kq", type=int, default=Dm.S1_KQ, help="search1: k_Q run at every size (Search 1.2)")
+    ap.add_argument("--all-points", action="store_true",
+                    help="search1: every query at every size (default: only the points of Search 1.1 / 1.2)")
     ap.add_argument("--tamper-kinds", nargs="+", default=Dm.TAMPER_KINDS, choices=Dm.TAMPER_KINDS)
     a = ap.parse_args()                           # อ่าน argument
     run = {"demo": run_demo, "selftest": run_selftest,  # ฟังก์ชันของแต่ละโหมด

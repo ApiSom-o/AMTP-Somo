@@ -28,7 +28,7 @@ from .bptree import BPlusTree
 from .core.hashing import H, HashCounter, enc_posting
 from .cuckoo import CuckooFilter
 from .index import (EMPTY_SLOT, IMT_EMPTY, SENTINEL_LO, ZERO, DomainState, Partition,
-                    domain_root, gamma, imt_leaf, imt_next, rho, sorted_imt_layout)
+                    domain_root, gamma, gamma_has_v, imt_leaf, imt_next, rho, sorted_imt_layout)
 from .update import aff_records
 from .core.merkle import MerkleTree, tree_size
 
@@ -241,8 +241,9 @@ class Engine:
             v_old = self.parts[pid].v
             if self.policy.versioned:
                 self._attr(self.parts[pid], "v", v_old + 1)
-                for h in self.keys_in[pid]:
-                    self._dirty_comp.add((h, pid))
+                if gamma_has_v():                  # v in γ: every γ of the partition changes with v
+                    for h in self.keys_in[pid]:
+                        self._dirty_comp.add((h, pid))
             parts_changed[pid] = (v_old, self.parts[pid].v)
         n_parts_changed = len(self._modified | self._new)
         aff = pi = None

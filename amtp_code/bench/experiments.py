@@ -35,6 +35,11 @@ Choices (state them in the paper):
   * Placement: a file goes to the least occupied partition serving its bucket
     (bucket = arXiv primary category folded into --buckets groups), as in bench.ablation.
   * Exp. 3 freezes the partitions (StaticPolicy): the paper excludes split/merge from Exp. 3.
+  * Every update (exp3, theta, exp5) runs the same Phase 2 protocol (class Protocol): b signed requests
+    are one epoch; update = owner request (tokens + σ_op) + CS prepare + owner Validator + Root Anchor
+    (file encryption reported apart as encrypt).
+  * search1 runs only the points the figures use (every k_Q at --fix files, k_Q = --s1-kq at every size);
+    --all-points runs every query at every size.
   * end_to_end = query_gen + server_total + verify_total; decrypting the returned files
     (CP-ABE stand-in + AES-GCM) is reported separately as du_decrypt.
   * Sizes follow baselines/wire_sizes.py (binary: hash 32 B, numbers 8 B, ciphertexts their real
@@ -60,7 +65,8 @@ from amtp.core import boolean                                    # noqa: E402
 from amtp.anchor import RootAnchor, transition_message           # noqa: E402
 from amtp.core.crypto import AttributeAuthority, Signer, make_ct          # noqa: E402
 from amtp.dht import ciphertext_id                               # noqa: E402
-from amtp.engine import Engine                                   # noqa: E402
+from amtp.engine import Engine
+from amtp.index import set_gamma_v                                   # noqa: E402
 from amtp.core.hashing import HashCounter, enc                   # noqa: E402
 from amtp.core.crypto import keyword_cipher                      # noqa: E402
 from amtp.nlp import norm                                         # noqa: E402
@@ -109,13 +115,21 @@ class Corpus:
             self._h[(domain, "C", word)] = keyword_cipher(self.keys_for(domain).k_s, norm(word))
         return self._h[(domain, "C", word)]
 
-    def request(self, doc, domain, epoch, signer):
-        """A signed insert request U_ins (Phase 2) for one document, freshly encrypted."""
+    def encrypt_fresh(self, doc, domain):
+        """Phase 1 file encryption of one document, new every call (not part of the update time)."""
         self._docs.pop((doc.doc_id, domain), None)
-        cid, ct, keys, bucket = self.encrypt(doc, domain)
+        return self.encrypt(doc, domain)
+
+    def insert_request(self, encrypted, doc, domain, epoch, signer):
+        """The signed insert request U_ins (Phase 2) for an encrypted document: the keyword tokens
+        C(d) = {DEnc_{K_s}(Norm(w))} computed fresh (never from the cache), then σ_op. Part of the update time,
+        as Chen's update counts its owner-side token generation."""
+        cid, ct, _, bucket = encrypted
+        k_s = self.keys_for(domain).k_s
         u = {"domain": domain, "op": "insert", "epoch": epoch, "nonce": os.urandom(16).hex(),
-             "id": doc.doc_id, "ct": ct, "bucket": bucket, "C": sorted({self.c(w, domain) for w in doc.keywords})}
-        return {"U": u, "sig": signer.sign(request_digest(u))}, cid
+             "id": doc.doc_id, "ct": ct, "bucket": bucket,
+             "C": sorted({keyword_cipher(k_s, norm(w)) for w in doc.keywords})}
+        return {"U": u, "sig": signer.sign(request_digest(u))}
 
     @staticmethod
     def delete_request(doc_id, cid, domain, epoch, signer):
@@ -165,6 +179,7 @@ class Domain:
         self.eng = Engine(name, policy or AdaptivePolicy(a.buckets, a.theta_min, a.theta_max))
         anchor.register_domain(name, self.signer.public, self.eng.R_D)      # R^(0)
         self.cids = []
+        self.doc_ids = [d.doc_id for d in docs]
         for i, d in enumerate(docs):
             cid, ct, keys, bucket = corpus.encrypt(d, name)
             if extra_words and i in extra_words:
@@ -187,6 +202,48 @@ class Domain:
             raise SystemExit("CORRECTNESS GATE FAILED: incremental R_D != full rebuild")
         self.server.store_state(state)
         return state
+
+
+class Protocol:
+    """The Phase 2 update protocol on a bulk-loaded Domain (one code path for exp3, theta and exp5):
+    the CS prepares the candidate (prepare_update: admit, apply, adapt, repair, Aff_i, Δ_i, π^upd), the owner's
+    Validator checks it and signs σ_root, the Root Anchor checks predecessor and e* + 1. The bulk-loaded start
+    state is trusted by the Validator (Validator.bootstrap); every measured update is fully validated."""
+
+    def __init__(self, dom, policy=None):
+        eng, server = dom.eng, dom.server
+        if policy is not None:
+            eng.policy = policy
+        docs = dict(zip(dom.doc_ids, dom.cids))
+        server.engines[dom.name], server.owner_keys[dom.name] = eng, [dom.signer.public]
+        server.docs[dom.name] = dict(docs)
+        self.dom = dom
+        self.val = Validator.bootstrap(dom.name, dom.signer, eng.policy, eng, docs, [dom.signer.public])
+
+    def epoch(self, make_requests):
+        """One epoch; make_requests() builds the b signed requests (the owner's tokens + σ_op, files already
+        encrypted). Returns ({request, server, validate, anchor, update, commit} ms, the CS's stats);
+        update = request + server + validate + anchor."""
+        dom = self.dom
+        tr = time.perf_counter()
+        requests = make_requests()
+        t0 = time.perf_counter()
+        prop = dom.server.prepare_update(dom.name, requests)
+        t1 = time.perf_counter()
+        sig = self.val.check(prop, requests)
+        t2 = time.perf_counter()
+        dom.anchor.submit(dom.name, prop["epoch_new"], prop["R_new"], sig, prop["delta"], prev=prop["R_old"])
+        t3 = time.perf_counter()
+        self.val.advance()
+        dom.server.finalize_update(dom.name, snapshot=False)
+        return {"request": (t0 - tr) * 1e3, "server": (t1 - t0) * 1e3, "validate": (t2 - t1) * 1e3,
+                "anchor": (t3 - t2) * 1e3, "update": (t3 - tr) * 1e3,
+                "commit": prop["stats"]["update_ms"]}, prop["stats"]
+
+    def check(self):
+        eng = self.dom.eng
+        if eng.snapshot().R_D != eng.R_D or self.val.R_D != eng.R_D or self.dom.anchor.latest(self.dom.name)[1] != eng.R_D:
+            raise SystemExit("CORRECTNESS GATE FAILED: incremental R_D != full rebuild / validator / anchor")
 
 
 # ---------------------------------------------------------------- queries
@@ -507,11 +564,13 @@ def suite_exp3(a):
     """Exp. 3 (update cost): at fixed N, b fresh documents (insert pool) are inserted as ONE epoch of b
     signed requests, then deleted again as one epoch. Partitions are frozen (no split/merge).
     Each epoch runs the Phase 2 protocol and times its parts:
-      phase1   encrypt the b documents and sign the requests (Data Owner, Phase 1 + U_op)
+      encrypt  Phase 1 file encryption of the b documents (reported apart, NOT in update)
+      request  owner builds the b signed requests: keyword tokens C(d) (fresh) + σ_op (delete: σ_op only)
       server   CS prepare_update: admit, apply, repair PAPC / IMT / partition trees, Aff_i, Δ_i, π^upd
       validate owner Validator: replay the update on trusted metadata, check π^upd, sign σ_root
       anchor   Root Anchor: predecessor, e* + 1, σ_root
-    update = server + validate + anchor (phase1 is reported apart, as in the other schemes)."""
+    update = request + server + validate + anchor: like Chen's update (owner token generation + CS apply),
+    without the file encryption."""
     corpus = Corpus(a)
     pool = corpus.D.insert_pool(a.domains, a.data)
     print(f"[exp3] dynamic update  sizes={a.sizes} b={a.batches}")
@@ -519,25 +578,10 @@ def suite_exp3(a):
     for n in a.sizes:
         src = corpus.D.sample(n, a.domains, a.data)
         dom, _, lay = setup("D", corpus, src, a)
-        eng, server, anchor = dom.eng, dom.server, dom.anchor
-        eng.policy = policy = StaticPolicy(a.buckets, a.theta_min, a.theta_max)
-        docs = {d.doc_id: c for d, c in zip(src, dom.cids)}
-        server.engines["D"], server.owner_keys["D"], server.docs["D"] = eng, [dom.signer.public], dict(docs)
-        val = Validator.bootstrap("D", dom.signer, policy, eng, docs, [dom.signer.public])
+        eng = dom.eng
+        proto = Protocol(dom, StaticPolicy(a.buckets, a.theta_min, a.theta_max))
+        epoch = proto.epoch
         cursor = 0
-
-        def epoch(requests):
-            t0 = time.perf_counter()
-            prop = server.prepare_update("D", requests)
-            t1 = time.perf_counter()
-            sig = val.check(prop, requests)
-            t2 = time.perf_counter()
-            anchor.submit("D", prop["epoch_new"], prop["R_new"], sig, prop["delta"], prev=prop["R_old"])
-            t3 = time.perf_counter()
-            val.advance()
-            server.finalize_update("D", snapshot=False)
-            return {"server": (t1 - t0) * 1e3, "validate": (t2 - t1) * 1e3, "anchor": (t3 - t2) * 1e3,
-                    "update": (t3 - t0) * 1e3, "commit": prop["stats"]["update_ms"]}, prop["stats"]
 
         for b in a.batches:
             eng.ops_per_epoch = b
@@ -547,25 +591,24 @@ def suite_exp3(a):
                 batch = [pool[(cursor + i) % len(pool)] for i in range(b)]
                 cursor = (cursor + b) % len(pool)
                 t0 = time.perf_counter()
-                made = [corpus.request(d, "D", eng.epoch, dom.signer) for d in batch]
-                t_p1 = (time.perf_counter() - t0) * 1e3
+                enc_b = [corpus.encrypt_fresh(d, "D") for d in batch]      # file encryption: not counted
+                t_enc = (time.perf_counter() - t0) * 1e3
                 gc.disable()
                 try:
-                    ins, st_ins = epoch([r for r, _ in made])
-                    dels = [Corpus.delete_request(d.doc_id, cid, "D", eng.epoch, dom.signer)
-                            for d, (_, cid) in zip(batch, made)]
-                    dele, st_del = epoch(dels)
+                    ins, st_ins = epoch(lambda: [corpus.insert_request(e, d, "D", eng.epoch, dom.signer)
+                                                 for d, e in zip(batch, enc_b)])
+                    dele, st_del = epoch(lambda: [Corpus.delete_request(d.doc_id, e[0], "D", eng.epoch, dom.signer)
+                                                  for d, e in zip(batch, enc_b)])
                 finally:
                     gc.enable()
-                for d in batch:                                # fresh encryption next time round
+                for d in batch:                                # drop the cached ciphertexts
                     corpus._docs.pop((d.doc_id, "D"), None)
                 if rep < a.warmup:
                     continue
-                rows["insert"].append({**ins, "phase1": t_p1})
+                rows["insert"].append({**ins, "encrypt": t_enc})
                 rows["delete"].append(dele)
                 stats = {"insert": st_ins, "delete": st_del}
-            if eng.snapshot().R_D != eng.R_D or val.R_D != eng.R_D:
-                raise SystemExit("CORRECTNESS GATE FAILED: incremental R_D != full rebuild / validator")
+            proto.check()
             for op in ("insert", "delete"):
                 res = summarize(rows[op])
                 mean = res["update_ms"]
@@ -575,9 +618,10 @@ def suite_exp3(a):
                       hash_calls=s["hash_calls"], keys_refreshed=s["keys_refreshed"],
                       posting_components_refreshed=s["posting_components_refreshed"],
                       partitions_changed=s["partitions_changed"], splits=s["splits"], merges=s["merges"])
-        del dom, val
+        del dom, proto
         gc.collect()
     w.close()
+
 
 def suite_exp5(a):
     """Exp. 5: D independent domains, replaying the shared baselines/results/exp5_workload.json (the same
@@ -590,7 +634,7 @@ def suite_exp5(a):
         raise SystemExit("exp5_workload.json has fewer update files than warmup + reps")
     target = groups[0]
     inv = corpus.D.inverted_index(target)
-    counts = [d for d in meta["domain_counts"] if d <= len(groups)]
+    counts = [d for d in meta["domain_counts"] if d <= len(groups) and d in a.d_counts]
     print(f"[exp5] multi-domain  D={counts} per-domain={meta['per_domain']} queries={len(queries)}")
     w = Writer("exp5_domains", a.out)
     for nd in counts:
@@ -610,22 +654,23 @@ def suite_exp5(a):
                 raise SystemExit(f"CORRECTNESS GATE FAILED: result != ground truth for {q['query']}")
             w.add(**base, kQ=q["kQ"], q=q["q"], shape=q["shape"], op="query", status="ok", **info, **res)
         samples = []
-        for rep in range(a.warmup + a.reps):                 # update the target domain only
+        target = doms[0]
+        proto = Protocol(target)                             # the target domain's own policy (adaptive)
+        for rep in range(a.warmup + a.reps):                 # update the target domain only: one insert = one epoch
             before = {d.name: anchor.latest(d.name) for d in doms[1:]}
-            cid, ct, keys, bucket = corpus.encrypt(fresh[rep], doms[0].name)
-            t0 = time.perf_counter()
-            server.store_ciphertext(cid, ct)
-            doms[0].eng.insert(cid, keys, bucket)
-            doms[0].eng.commit()
-            t1 = time.perf_counter()
-            doms[0].finalize()                               # signature + anchor + Global Root
-            t2 = time.perf_counter()
+            e = corpus.encrypt_fresh(fresh[rep], target.name)          # file encryption: not counted
+            gc.disable()                                     # same timing rule as exp3
+            try:
+                times, _ = proto.epoch(lambda: [corpus.insert_request(e, fresh[rep], target.name,
+                                                                      target.eng.epoch, target.signer)])
+            finally:
+                gc.enable()
             if any(anchor.latest(d.name) != before[d.name] for d in doms[1:]):
                 raise SystemExit("ISOLATION FAILED: updating one domain changed another Domain Root")
             if rep >= a.warmup:
-                samples.append({"update": (t2 - t0) * 1e3, "domain_update": (t1 - t0) * 1e3,
-                                "anchor_update": (t2 - t1) * 1e3})
-        w.add(**base, op="update_one_domain", update_kind="dynamic", status="ok",
+                samples.append(times)
+        proto.check()
+        w.add(**base, op="update_one_domain", update_kind="dynamic", b=1, status="ok",
               untouched_roots_unchanged=nd - 1, **summarize(samples))
         del doms, states, anchor, server
         gc.collect()
@@ -642,15 +687,20 @@ def suite_search1(a):
     size. Each query must return exactly its result_size from the file and the plaintext ground truth."""
     corpus = Corpus(a)
     qs = corpus.D.search_single_queries()
-    print(f"[search1] domains={a.s_domains} files/domain={a.fpd} queries={len(qs)}")
+    plan = corpus.D.search1_points(qs, a.fpd, a.fix, a.s1_kq, a.all_points)
+    print(f"[search1] domains={a.s_domains} files/domain={a.fpd} queries={len(qs)} "
+          f"points={sum(map(len, plan.values()))}")
     w = Writer("search_single", a.out)
     for dname in a.s_domains:
         for n in a.fpd:
+            mine = [q for q in plan[n] if q["domain"] == dname]
+            if not mine:
+                continue
             src = corpus.D.domain_docs(dname, n, a.data)
             dom, state, lay = setup(dname, corpus, src, a)
             user = corpus.user([dname])
             inv = corpus.D.inverted_index(src)
-            for q in (q for q in qs if q["domain"] == dname):
+            for q in mine:
                 res, info = measure(dom, state, user, q["text"], a)
                 ids = info.pop("ids")
                 if len(ids) != q["result_size"][str(n)] or ids != ground_truth(q["text"], inv, dom.cids):
@@ -846,41 +896,40 @@ def suite_theta(a):
                               ("query_gen_ms", "server_total_ms", "verify_total_ms", "end_to_end_ms")})
             for k in info_sum:
                 info_sum[k].append(info[k])
-        dom.eng.policy = StaticPolicy(a.buckets, a.theta_min, a.theta_max)
+        proto = Protocol(dom, StaticPolicy(a.buckets, a.theta_min, a.theta_max))   # frozen, as in exp3
         upd = {}
         for b in (1, 100):
+            dom.eng.ops_per_epoch = b
             samples = []
             for rep in range(a.warmup + a.reps):
                 batch = [pool[(cursor + i) % len(pool)] for i in range(b)]
                 cursor = (cursor + b) % len(pool)
-                prepared = [corpus.encrypt(d, "D") for d in batch]
-                t0 = time.perf_counter()
-                for cid, ct, keys, bucket in prepared:
-                    dom.server.store_ciphertext(cid, ct)
-                    dom.eng.insert(cid, keys, bucket)
-                st_ins = dom.eng.commit()
-                dom.finalize()
-                t_ins = (time.perf_counter() - t0) * 1e3
-                for cid, *_ in prepared:
-                    dom.eng.delete(cid)
-                dom.eng.commit()
-                dom.finalize()
-                for d in batch:
+                enc_b = [corpus.encrypt_fresh(d, "D") for d in batch]
+                gc.disable()
+                try:
+                    ins, st_ins = proto.epoch(lambda: [corpus.insert_request(e, d, "D", dom.eng.epoch, dom.signer)
+                                                       for d, e in zip(batch, enc_b)])   # insert b files: one epoch
+                    proto.epoch(lambda: [Corpus.delete_request(d.doc_id, e[0], "D", dom.eng.epoch, dom.signer)
+                                         for d, e in zip(batch, enc_b)])                 # and delete them again
+                finally:
+                    gc.enable()
+                for d in batch:                                # drop the cached ciphertexts
                     corpus._docs.pop((d.doc_id, "D"), None)
                 if rep >= a.warmup:
-                    samples.append(t_ins)
+                    samples.append(ins)
                     upd.setdefault(f"keys_refreshed_b{b}", st_ins["keys_refreshed"])
-            upd[f"insert_b{b}_ms_median"] = st.median(samples)
-            upd[f"insert_b{b}_per_doc_ms"] = st.median(samples) / b
-        if dom.eng.snapshot().R_D != dom.eng.R_D:
-            raise SystemExit("CORRECTNESS GATE FAILED: incremental R_D != full rebuild")
+            for part in ("update", "server", "validate"):
+                upd[f"insert_b{b}_{part}_ms_median"] = st.median(x[part] for x in samples)
+            upd[f"insert_b{b}_ms_median"] = upd[f"insert_b{b}_update_ms_median"]
+            upd[f"insert_b{b}_per_doc_ms"] = upd[f"insert_b{b}_update_ms_median"] / b
+        proto.check()
         w.add(N=a.n, theta_max=tmax, theta_min=tmax // 4, partitions=lay["partitions"],
               max_partition=lay["max_partition"],
               **{f"query_{k}_ms_median": st.median(x[k] for x in q_samples)
                  for k in ("query_gen", "server_total", "verify_total", "end_to_end")},
               sQ_median=st.median(info_sum["sQ"]), proof_bytes_median=st.median(info_sum["proof_bytes"]),
               **upd)
-        del dom, state
+        del dom, state, proto
         gc.collect()
     w.close()
 
@@ -911,14 +960,22 @@ def main():
     ap.add_argument("--s-domains", nargs="+", default=list(D.DOMAINS), help="v4 single-domain suites: domains")
     ap.add_argument("--fpd", type=int, nargs="+", default=D.V4_SIZES, help="search1: files per domain")
     ap.add_argument("--fix", type=int, default=D.V4_FIX, help="verify1 / xsearch / xverify / xdomains: files per domain")
-    ap.add_argument("--d-counts", type=int, nargs="+", default=D.D_COUNTS, help="xdomains: number of domains")
+    ap.add_argument("--s1-kq", type=int, default=D.S1_KQ, help="search1: k_Q run at every size (Search 1.2)")
+    ap.add_argument("--all-points", action="store_true",
+                    help="search1: every query at every size (default: only the points of Search 1.1 / 1.2)")
+    ap.add_argument("--d-counts", type=int, nargs="+", default=D.D_COUNTS, help="xdomains / exp5: number of domains")
     ap.add_argument("--max-queries", type=int, default=0, help="xdomains: first n boolean_multi queries (0 = all)")
     ap.add_argument("--x-kq", type=int, nargs="+", default=None, help="xdomains: keep only these kQ (default all)")
     ap.add_argument("--shapes", nargs="+", default=None, choices=["AND", "OR", "AND_of_OR", "OR_of_AND"],
                     help="xdomains: keep only these query shapes (default all)")
     ap.add_argument("--tamper-kinds", nargs="+", default=D.TAMPER_KINDS, choices=D.TAMPER_KINDS)
     ap.add_argument("--out", default=OUT)
+    ap.add_argument("--gamma-no-v", action="store_true",
+                    help="γ = H(PID ‖ H(Enc(L))) without the partition version v (study B4; same as AMTP_GAMMA_V=0)")
     a = ap.parse_args()
+    if a.gamma_no_v or os.environ.get("AMTP_GAMMA_V", "1") == "0":
+        os.environ["AMTP_GAMMA_V"] = "0"                  # recorded in every manifest
+        set_gamma_v(False)
     run = {"exp1": suite_exp1, "exp2-layouts": suite_exp2_layouts, "exp2": suite_exp2, "exp3": suite_exp3, "exp5": suite_exp5,
            "theta": suite_theta, "search1": suite_search1, "verify1": suite_verify1, "tamper": suite_tamper,
            "xsearch": suite_xsearch, "xverify": suite_xverify, "xdomains": suite_xdomains}

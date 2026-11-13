@@ -24,7 +24,7 @@ from .core.crypto import sig_ok
 from .core.hashing import H, enc_posting
 from .core.merkle import (PAD, grown_root, leaf_hash, merkle_root, root_from_proof, root_of_leaf_hashes,
                           tree_size)
-from .index import EMPTY_SLOT, IMT_EMPTY, SENTINEL_LO, ZERO, domain_root, imt_leaf, rho
+from .index import EMPTY_SLOT, IMT_EMPTY, SENTINEL_LO, ZERO, domain_root, gamma_has_v, gamma_inner, imt_leaf, rho
 from .anchor import transition_message
 from .update import aff_records, delta, enc_aff, genesis_roots, request_digest
 
@@ -383,7 +383,7 @@ class Validator:
         for c, p in m.events:
             for h in (m.fwd[c] if c in m.fwd else self.fwd[c]):
                 dirty.add((h, p))
-        if self.policy.versioned:
+        if self.policy.versioned and gamma_has_v():      # v in γ: a version bump refreshes every γ of p
             for p in m.modified:
                 for c in m.live_entries(p):
                     for h in m.fwd_of(c):
@@ -401,10 +401,10 @@ class Validator:
             return m.vers.get(p, self.v.get(p))
 
         def g_old(h, p):
-            return H(p, v_old(p), H(enc_posting(old_by[(h, p)])))
+            return gamma_inner(p, v_old(p), H(enc_posting(old_by[(h, p)])))
 
         def g_new(h, p):
-            return H(p, v_new(p), H(enc_posting(new_by[(h, p)])))
+            return gamma_inner(p, v_new(p), H(enc_posting(new_by[(h, p)])))
 
         keys_ev = pi["keys"]
         rho_old, rho_new, present, added, removed = {}, {}, {}, [], set()
@@ -445,7 +445,7 @@ class Validator:
                 rho_old[h] = rho(h, n_sel, root_of_leaf_hashes([leaf_hash(g) for g in gl]))
                 labels = {pos[p]: p for p in old_p}
                 for j, (p, v, inner) in ev["pre"].items():
-                    if not (0 <= j < n_sel) or gl[j] != H(p, v, inner):
+                    if not (0 <= j < n_sel) or gl[j] != gamma_inner(p, v, inner):
                         raise Invalid("neighbour preimage does not match the γ list")
                     labels[j] = p
                 ins = ev["ins"]

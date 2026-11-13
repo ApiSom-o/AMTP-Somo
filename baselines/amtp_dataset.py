@@ -277,6 +277,7 @@ V4_SIZES = [10_000, 25_000, 50_000, 75_000, 100_000, 125_000]   # files per doma
 V4_FIX = 100_000                                  # files per domain where the size is fixed (tamper_sets use it)
 D_COUNTS = [1, 2, 4, 8, 16, 32]                   # columns of domain_groups.csv
 TAMPER_KINDS = ["modify", "hide", "inject", "old_version"]
+S1_KQ = 5                                         # Search 1.2: k_Q of the files-per-domain figure
 # modify = change returned file bytes; hide = leave matching files out; inject = add files that do not match the
 # query; old_version = return an older (validly encrypted) version of the file. Applied to t files, t = tamper_counts.
 OLD_VERSION_SUFFIX = b"\n[previous version of this file]"   # the "older version" every scheme encrypts
@@ -291,6 +292,12 @@ def search_single_queries():
     """Search 1.1 / 1.2: AND queries inside one domain. Keys: query_id, domain, kQ, shape (single / AND),
     text (AMTP syntax, quoted), keywords, result_size {files_per_domain: exact count}"""
     return _jsonl("queries_search_single.jsonl")
+
+
+def search1_points(queries, sizes, fix=V4_FIX, kq=S1_KQ, every=False):
+    """{files per domain: queries to run there}. Only the points the plan's figures use: every k_Q at `fix`
+    files (Search 1.1) and k_Q = `kq` at every size (Search 1.2). every=True: every query at every size."""
+    return {n: [q for q in queries if every or n == fix or q["kQ"] == kq] for n in sizes}
 
 
 def boolean_multi_queries():
@@ -426,7 +433,8 @@ def write_manifest(csv_path):
     info = {"result": os.path.basename(csv_path), "command": " ".join(sys.argv),
             "written": time.strftime("%Y-%m-%d %H:%M:%S %z"), "git_commit": git("rev-parse", "HEAD"),
             "git_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
-            "dataset": DATASET_TAG, "machine": machine_info()}
+            "dataset": DATASET_TAG, "machine": machine_info(),
+            "amtp_gamma_v": os.environ.get("AMTP_GAMMA_V", "1") != "0"}   # AMTP: γ with the version v (B4 study)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(info, f, indent=1, ensure_ascii=False)
     return out

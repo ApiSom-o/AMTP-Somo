@@ -12,6 +12,8 @@ results/
   du/                 Du et al. [7]      du_<suite>.csv        + figures/
   secollab/           SE-COLLAB [37]     secollab_<suite>.csv  + figures/
   compare/            every scheme of an experiment in one graph (compare_*, see ../README.md "Figures")
+  runs/<run>/         one run of scripts/aws_run_all.sh (git-ignored): <scheme>/ CSVs, amtp/splitmerge_*/, logs/,
+                      figures/ from  python3 baselines/plot_paper.py baselines/results/runs/<run>
 ```
 
 | Paper | Exp. 1 search | Exp. 2 proof / verify | Exp. 3 update | Exp. 5 domains | other |

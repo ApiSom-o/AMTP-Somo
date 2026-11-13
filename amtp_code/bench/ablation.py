@@ -10,6 +10,10 @@ and in manifest.json). Sizes follow baselines/wire_sizes.py (binary, the rule of
 
 Fairness built in:
   * every variant runs the same engine code; only the partition policy differs
+  * update cost = the whole batch on the Cloud Server: placing / removing every file (slot Merkle paths,
+    postings) AND the commit (adapt, PAPC / IMT / partition-tree repair). Timing only the commit would leave
+    out the slot-tree work, whose path is longer in a big partition (Global-MT, a bloated Static-MT one);
+    hash_calls / hash_bytes count the same whole batch
   * same seed -> same initial documents, update stream and queries for all variants
   * AMTP and Static-MT start from the identical partition layout
   * θ values are inputs fixed before the run (tune them on a separate seed)
@@ -19,6 +23,7 @@ Fairness built in:
 """
 import argparse
 import csv
+import gc
 import json
 import os
 import platform
@@ -29,8 +34,10 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from amtp.core import boolean                                    # noqa: E402
+from amtp.core.hashing import HashCounter                        # noqa: E402
 from amtp.dht import DHT                                          # noqa: E402
 from amtp.engine import Engine                                    # noqa: E402
+from amtp.index import set_gamma_v                                # noqa: E402
 from amtp.server import build_response                            # noqa: E402
 from amtp.user import DataUser                                    # noqa: E402
 from amtp.variants import AdaptivePolicy, GlobalPolicy, StaticPolicy   # noqa: E402
@@ -67,13 +74,17 @@ def run_queries(eng, queries, dht, verifier):
     for i, (shape, ast) in enumerate(queries):
         b_q = boolean.canonical(ast)
         nonce = f"{i:032x}"
-        t0 = time.perf_counter()
-        resp = build_response(state, b_q, nonce, dht)
-        server_ms = (time.perf_counter() - t0) * 1000
-        resp = json.loads(json.dumps(resp))
-        ctx = {"domain": DOMAIN, "B_Q": json.loads(json.dumps(b_q)), "epoch": state.epoch,
-               "nonce": nonce, "R_D": state.R_D.hex()}
-        rep = verifier.verify(ctx, resp)
+        gc.disable()                                    # as in every other suite: no GC pause in a timing
+        try:
+            t0 = time.perf_counter()
+            resp = build_response(state, b_q, nonce, dht)
+            server_ms = (time.perf_counter() - t0) * 1000
+            resp = json.loads(json.dumps(resp))
+            ctx = {"domain": DOMAIN, "B_Q": json.loads(json.dumps(b_q)), "epoch": state.epoch,
+                   "nonce": nonce, "R_D": state.R_D.hex()}
+            rep = verifier.verify(ctx, resp)
+        finally:
+            gc.enable()
         if not rep["accepted"]:
             raise SystemExit(f"CORRECTNESS GATE FAILED: honest query rejected at {rep['failed']}")
         ev = resp["proof"]["evidence"]
@@ -116,12 +127,18 @@ def main():
     ap.add_argument("--global-versioned", action="store_true",
                     help="also run Global-MT(v): one partition with version bumps")
     ap.add_argument("--out", default="results")
+    ap.add_argument("--gamma-no-v", action="store_true",
+                    help="γ = H(PID ‖ H(Enc(L))) without the partition version v (study B4; same as AMTP_GAMMA_V=0)")
     a = ap.parse_args()
+    if a.gamma_no_v or os.environ.get("AMTP_GAMMA_V", "1") == "0":
+        os.environ["AMTP_GAMMA_V"] = "0"                  # recorded in every manifest
+        set_gamma_v(False)
 
     variants = ["AMTP", "Static-MT", "Global-MT"] + (["Global-MT(v)"] if a.global_versioned else [])
     skews = [float(s) for s in a.skews.split(",")]
     os.makedirs(a.out, exist_ok=True)
-    manifest = {"args": vars(a), "b": a.batch_size, "python": sys.version, "platform": platform.platform(),
+    manifest = {"args": vars(a), "b": a.batch_size, "gamma_v": os.environ.get("AMTP_GAMMA_V", "1") != "0",
+                "python": sys.version, "platform": platform.platform(),
                 "machine": platform.machine(), "processor": platform.processor(),
                 "cpus": os.cpu_count(), "started": time.strftime("%Y-%m-%d %H:%M:%S")}
     if a.source == "arxiv":                     # same git commit / machine record as the other suites
@@ -181,12 +198,22 @@ def main():
                     return lay
 
                 for bi, ops in enumerate(stream):
-                    for op in ops:
-                        if op[0] == "ins":
-                            eng.insert(op[1].cid, op[1].keys, op[2])
-                        else:
-                            eng.delete(op[1])
-                    st = eng.commit()
+                    c0, b0 = HashCounter.snapshot()
+                    gc.disable()                        # as in every other suite: no GC pause in a timing
+                    try:
+                        t0 = time.perf_counter()
+                        for op in ops:
+                            if op[0] == "ins":
+                                eng.insert(op[1].cid, op[1].keys, op[2])
+                            else:
+                                eng.delete(op[1])
+                        st = eng.commit()
+                        t1 = time.perf_counter()
+                    finally:
+                        gc.enable()
+                    c1, b1 = HashCounter.snapshot()
+                    st.update(commit_ms=st["update_ms"], update_ms=(t1 - t0) * 1000,      # the whole batch
+                              hash_calls=c1 - c0, hash_bytes=b1 - b0)
                     splits += st["splits"]
                     merges += st["merges"]
                     _write(writers, files, "updates", {**tag, "batch": bi, "phase": phases[bi], **_round(st)})
