@@ -4,7 +4,6 @@ The server is untrusted. `mode` lets the demo make it misbehave in one
 specific way so the user can watch Phase 5 catch it. Every attack below is a
 real modification of the real response; nothing about the verdict is faked.
 """
-import bisect
 import copy
 import time
 
@@ -122,7 +121,7 @@ class CloudServer:
     def _attack(self, mode, attack, state, b_q, t_q):
         domain, nonce = t_q["domain"], t_q["nonce"]
         keys = sorted(boolean.leaves(b_q))
-        present = [h for h in keys if bytes.fromhex(h) in state.postings]
+        present = [h for h in keys if lookup(state, bytes.fromhex(h)) is not None]
 
         if mode == "stale":
             older = self.states[domain].get(state.epoch - 1)
@@ -184,8 +183,10 @@ def _ms(start):
     return round((time.perf_counter() - start) * 1000, 2)
 
 
-def _components(state, h: bytes):
-    return [(pid, [(cid.hex(), slot) for cid, slot in comp]) for pid, comp in state.postings[h]]
+def _components(state, h: bytes, posting=None):
+    """L_h on the wire: [(PID, [(cid hex, ℓ), ...]), ...] in PID order."""
+    posting = state.postings[h] if posting is None else posting
+    return [(pid, [(cid.hex(), slot) for cid, slot in comp]) for pid, comp in posting]
 
 
 def evaluate_on_state(state, b_q) -> set:
@@ -193,7 +194,7 @@ def evaluate_on_state(state, b_q) -> set:
     for h in boolean.leaves(b_q):
         hb = bytes.fromhex(h)
         sets[h] = {(cid, pid, slot) for pid, comp in _components(state, hb)
-                   for cid, slot in comp} if hb in state.postings else set()
+                   for cid, slot in comp} if lookup(state, hb) is not None else set()
     return boolean.evaluate(b_q, sets)
 
 
@@ -214,8 +215,9 @@ def build_response(state, b_q, nonce, dht, hide=None, fake_absent=None, offline=
     evidence, leaf_sets = [], {}
     for h in sorted(boolean.leaves(b_q)):
         hb = bytes.fromhex(h)
-        if hb in state.postings and h != fake_absent:
-            comps = _components(state, hb)
+        posting = None if h == fake_absent else lookup(state, hb)
+        if posting is not None:
+            comps = _components(state, hb, posting)
             if hide and hide[0] == h:
                 comps = [(pid, [e for e in comp if e[0] != hide[1]]) for pid, comp in comps]
                 comps = [(pid, comp) for pid, comp in comps if comp]
@@ -264,12 +266,20 @@ def build_response(state, b_q, nonce, dht, hide=None, fake_absent=None, offline=
     }
 
 
+def lookup(state, hb: bytes):
+    """Phase 4 lookup: the Cuckoo filter answers "absent" at once (no false negatives); otherwise
+    the B+ Search Tree gives the posting state. None = not indexed. Neither structure is evidence:
+    present keys are proven by PAPC + IMT, absent keys by IMT non-membership."""
+    if not state.cuckoo.might_contain(hb):
+        return None
+    return state.postings.get(hb)
+
+
 def _absent_evidence(state, hb: bytes, lie=False):
     """Non-membership: the predecessor leaf h_lo with h_lo < h < next(h_lo).
     For a key that IS indexed (lie=True) the honest predecessor has next(h_lo) = h,
     so the forged absence claim fails the bracket check."""
-    k = bisect.bisect_left(state.imt_sorted, hb)
-    lo = state.imt_sorted[k - 1] if k else SENTINEL_LO
+    lo = state.postings.predecessor(hb) or SENTINEL_LO     # B+ tree: largest indexed key below h
     pos = state.imt_pos[lo]
     leaf = {"pos": pos, "h": lo.hex(), "rho": state.imt_rho[lo].hex(),
             "next": state.imt_next[lo].hex()}

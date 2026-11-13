@@ -18,7 +18,9 @@ import bisect
 import time
 from collections import Counter
 
+from .bptree import BPlusTree
 from .core.hashing import H, HashCounter
+from .cuckoo import CuckooFilter
 from .index import (EMPTY_SLOT, IMT_EMPTY, SENTINEL_LO, ZERO, DomainState, Partition,
                     domain_root, gamma, imt_leaf, imt_next, rho, sorted_imt_layout)
 from .core.merkle import MerkleTree
@@ -33,7 +35,8 @@ class Engine:
         self.lineage, self.by_bucket = {}, {}  # pid -> buckets served; bucket -> pids
         self.live, self.free = {}, {}          # pid -> live count / tombstoned slots
         self.loc, self.fwd = {}, {}            # cid -> (pid, slot) / keyword keys
-        self.comp = {}                         # h -> {pid: {cid: slot}}
+        self.comp = BPlusTree(64)              # B+ Search Tree: h -> {pid: {cid: slot}}
+        self.cuckoo = CuckooFilter(1024)       # lookup accelerator over the keys of self.comp
         self.keys_in = {}                      # pid -> Counter(h)
         self.gam, self.rho = {}, {}            # h -> {pid: γ} / h -> ρ
         self.post = {}                         # h -> (pid order, MerkleTree over γ) for R^post
@@ -116,7 +119,8 @@ class Engine:
                     added.append(h)
                 self.rho[h] = rho(h, len(self.comp[h]), self._post_root(h, dirty_pids[h]))
             else:
-                self.comp.pop(h, None)
+                if self.comp.pop(h, None) is not None:
+                    self.cuckoo.delete(h)          # the key left the index: remove it once
                 self.gam.pop(h, None)
                 self.post.pop(h, None)
                 if self.rho.pop(h, None) is not None:
@@ -202,7 +206,13 @@ class Engine:
     def _attach(self, cid, pid, slot):
         self.loc[cid] = (pid, slot)
         for h in self.fwd[cid]:
-            self.comp.setdefault(h, {}).setdefault(pid, {})[cid] = slot
+            by_pid = self.comp.get(h)
+            if by_pid is None:                     # the key enters the index: add it once
+                by_pid = {}
+                self.comp.insert(h, by_pid)
+                if not self.cuckoo.insert(h):
+                    self.cuckoo = CuckooFilter.from_keys(self.comp.keys(), 2 * len(self.comp))
+            by_pid.setdefault(pid, {})[cid] = slot
             self.keys_in[pid][h] += 1
             self._dirty_comp.add((h, pid))
 

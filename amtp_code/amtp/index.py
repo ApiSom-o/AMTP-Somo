@@ -8,7 +8,9 @@ import copy
 import re
 from dataclasses import dataclass, field
 
+from .bptree import BPlusTree
 from .core.hashing import H, enc_posting
+from .cuckoo import CuckooFilter
 from .core.merkle import MerkleTree, merkle_root
 
 EMPTY_SLOT = b""
@@ -109,12 +111,11 @@ class DomainState:
             pid, slot = self.loc[cid]
             for h in keys:
                 groups.setdefault(h, {}).setdefault(pid, []).append((cid, slot))
-        self.postings = {}
-        for h, by_pid in groups.items():
-            self.postings[h] = [
-                (pid, sorted(entries, key=lambda e: e[1]))
-                for pid, entries in sorted(by_pid.items())
-            ]
+        # B+ Search Tree T^S_i over the protected keys, plus the Cuckoo filter in front of it
+        self.postings = BPlusTree.from_sorted(
+            (h, [(pid, sorted(entries, key=lambda e: e[1])) for pid, entries in sorted(groups[h].items())])
+            for h in sorted(groups))
+        self.cuckoo = CuckooFilter.from_keys(self.postings.keys())
 
         # PAPC per keyword, then the indexed IMT: leaf H(h ‖ ρ ‖ next(h)) at its position
         self.rho = {}
@@ -124,7 +125,6 @@ class DomainState:
         layout = self.imt_layout or sorted_imt_layout(self.rho)
         if set(layout) - {None, SENTINEL_LO} != set(self.rho) or layout[0] != SENTINEL_LO:
             raise ValueError("IMT layout does not hold exactly the indexed keys")
-        self.imt_sorted = sorted(self.rho)       # for the predecessor of an absent key
         self.imt_next = imt_next(self.rho)
         self.imt_rho = {**self.rho, SENTINEL_LO: ZERO}
         self.imt_pos = {h: i for i, h in enumerate(layout) if h is not None}
