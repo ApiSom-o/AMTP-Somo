@@ -1,6 +1,6 @@
 # Results
 
-One folder per paper. Every scheme runs on arXiv dataset-v4 with `--reps 30 --warmup 3`.
+One folder per paper. Every scheme runs on arXiv dataset-v4 with `--reps 15 --warmup 3` (scripts/aws_run_all.sh).
 
 ```
 results/

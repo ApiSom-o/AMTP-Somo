@@ -4,7 +4,7 @@
 #   bash scripts/cloud_worker.sh 3             # everything worker 3 runs, in order
 #   bash scripts/cloud_worker.sh job sm128     # one or more named jobs (to move work between machines)
 #   bash scripts/cloud_worker.sh list          # the plan
-#   CALIB=1 bash scripts/cloud_worker.sh 3     # calibration: REPS=1 WARMUP=0, run name <name>_calib
+#   CALIB=1 bash scripts/cloud_worker.sh 3     # calibration: REPS=1 WARMUP=0, short split/merge, run <name>_calib
 #   DRY_RUN=1 bash scripts/cloud_worker.sh 3   # print the commands only
 #
 # Two rounds, each its own run folder (same name on every machine, merged later with scripts/merge_runs.py):
@@ -15,7 +15,8 @@ set -u
 cd "$(dirname "$0")/.."
 NAME=${RUN_NAME:-paper}
 if [ -n "${CALIB:-}" ]; then
-  export REPS=1 WARMUP=0
+  # full sizes, 1 run per point; split / merge: 1 run of 100 insert batches (x ~16.5 batches x 3 runs for the real one)
+  export REPS=1 WARMUP=0 SM_RUNS=1 SM_BATCHES=100
   NAME=${NAME}_calib
 fi
 
@@ -42,19 +43,20 @@ job_env() {
   esac
 }
 
-# worker -> jobs, longest first (estimated from the smoke run; re-balance after the calibration run)
+# worker -> jobs (estimated from the smoke run, REPS = 15; re-balance after the calibration run).
+# The six split / merge jobs (not shortened by REPS) go to six different machines.
 plan() {
   case $1 in
-    1)  echo "tamper-amtp-a" ;;
-    2)  echo "tamper-amtp-b" ;;
-    3)  echo "tamper-chen-a" ;;
-    4)  echo "tamper-chen-b" ;;
-    5)  echo "tamper-du-se verify1 nov-sm256" ;;
-    6)  echo "search1-amtp-chen update nov-update nov-exp5" ;;
-    7)  echo "search1-du-se exp5 nov-sm128" ;;
-    8)  echo "multi-amtp sm256" ;;
+    1)  echo "tamper-amtp-a sm64" ;;
+    2)  echo "tamper-amtp-b sm128" ;;
+    3)  echo "tamper-chen-a nov-sm64" ;;
+    4)  echo "tamper-chen-b nov-sm128" ;;
+    5)  echo "tamper-du-se verify1 nov-update" ;;
+    6)  echo "search1-amtp-chen update nov-exp5" ;;
+    7)  echo "search1-du-se exp5" ;;
+    8)  echo "multi-amtp nov-sm256" ;;
     9)  echo "multi-se" ;;
-    10) echo "sm64 sm128 nov-sm64" ;;
+    10) echo "sm256" ;;
     *) return 1 ;;
   esac
 }

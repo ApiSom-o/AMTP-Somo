@@ -42,7 +42,7 @@ set -u
 cd "$(dirname "$0")/.."
 REPO=$(pwd)
 PY=${PY:-$REPO/.venv/bin/python}
-REPS=${REPS:-30}
+REPS=${REPS:-15}                                       # median of 15 runs after 3 warm-up runs
 WARMUP=${WARMUP:-3}
 GV=${AMTP_GAMMA_V:-1}; export AMTP_GAMMA_V=$GV         # 0: AMTP's γ without the version v (study B4)
 RUN_ID=${RUN_ID:-$(date '+%Y%m%d_%H%M')_$(git rev-parse --short HEAD)$([ "$GV" = 0 ] && echo _gamma_no_v)}
