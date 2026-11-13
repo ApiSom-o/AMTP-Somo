@@ -91,6 +91,7 @@ column. Results in `baselines/results/du/` were re-run with this definition.
 ## 4. ต่างจากการทดลองใน paper ต้นฉบับ
 - Paper ใช้ RFC dataset 8,502 ไฟล์ (เฉลี่ย 52 KB, keyword top 5% ต่อไฟล์) บน Python, i7-9750H + Xeon Silver 4110
   และจำลอง cloud ด้วย network port
-- ของเราใช้ dataset-v3 สูงสุด 200,000 ไฟล์ (title + abstract, keyword RAKE ≤ 10 คำต่อไฟล์) และจำลอง cloud ใน process เดียว
+- ของเราใช้ dataset-v4 (arXiv, 4 domain x 125,000 ไฟล์, title + abstract, keyword RAKE ≤ 20 วลีต่อไฟล์) และจำลอง cloud ใน process เดียว
+  (ตัวเลขในหัวข้อ 3.2 เป็นผลเก่าบน dataset-v3 ไว้ดูแนวโน้มเท่านั้น)
   เวลา `server_total` คือ cloud ที่ช้าที่สุด (cloud ทำงานขนาน) ไม่รวมเวลาเครือข่าย
 - ตัวเลขยังไม่ใช่ผลสุดท้าย ต้องรันซ้ำบนเครื่องที่จะรายงานใน paper

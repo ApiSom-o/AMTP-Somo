@@ -223,7 +223,7 @@ __marimo__/
 maildir/
 enron_mail_*.tar.gz
 
-# arXiv dataset (download amtp_file_db_v3.zip from release dataset-v3): never commit
+# arXiv dataset unpacked by datasets/arxiv/unpack.py into data/ (dataset-v4 parts stay in datasets/arxiv/data_v4/): never commit
 /data/
 arxiv-metadata-oai-snapshot.json
 amtp_file_db*.zip

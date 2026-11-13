@@ -38,12 +38,12 @@ Simulation ของ baseline Chen et al. [40]
      index เต็มของ Chen = keyword x gamma บิต (~32 GB) จึงสร้าง entry เฉพาะคำที่ทดลอง
      (bitmap ของคำนั้นครบทุกเอกสาร เวลาค้น/verify เท่าแบบเต็ม) ขนาด storage ยังรายงานของ index เต็ม
 
-Workload: dataset กลางของ AMTP (GitHub release dataset-v3, arXiv 4 domain) ผ่าน amtp_dataset.py
+Workload: dataset กลางของ AMTP (dataset-v4, arXiv 4 domain x 125,000 ไฟล์, ไฟล์ใน datasets/arxiv/data_v4/) ผ่าน amtp_dataset.py
   - N เอกสาร = N/4 ไฟล์แรกของแต่ละ domain (ไม่สุ่ม) -> ทุก scheme ได้เอกสารชุดเดียวกัน
   - keyword ใช้ที่สกัดไว้ใน documents.csv ตรง ๆ, exp3 ใช้เอกสารจริงจาก insert_pool
   - exp1 ตรวจผลทุก query กับ ground truth จาก plaintext index (ต้องตรงเป๊ะ)
 
-วิธีรัน (pip install cryptography, แตก dataset ไว้ที่ <repo>/data/amtp_file_db หรือใส่ --data):
+วิธีรัน (pip install cryptography, แตก dataset ด้วย datasets/arxiv/unpack.py ไว้ที่ <repo>/data/amtp_file_db_v4 หรือใส่ --data):
   python3 chen_et_al_sim.py demo                       # ทีละขั้น + จับ CS ที่โกง
   python3 chen_et_al_sim.py selftest                   # ทดสอบความถูกต้อง 12 ข้อ
   python3 chen_et_al_sim.py exp1                       # replay results/exp1_queries.json (default)
@@ -1369,7 +1369,7 @@ def main():
     ap.add_argument("mode", choices=["demo", "selftest", "exp1", "exp2", "exp3", "all",
                                      "search1", "verify1", "tamper"])  # โหมดที่จะรัน
     # ---- dataset กลาง (amtp_dataset.py) ----
-    ap.add_argument("--data", default=None, help="โฟลเดอร์ amtp_file_db (ค่าเริ่มต้น <repo>/data/amtp_file_db)")
+    ap.add_argument("--data", default=None, help="โฟลเดอร์ dataset (ค่าเริ่มต้น <repo>/data/amtp_file_db_v4 หรือ AMTP_DATA)")
     ap.add_argument("--domains", nargs="+", default=["D1", "D2", "D3", "D4"], help="domain ที่ใช้")
     ap.add_argument("--seed", type=int, default=42, help="seed ของการสร้าง query (เท่ากับ seed ของ dataset)")
     # ---- ชื่อและค่าเริ่มต้นเหมือนกันทุก baseline (du / se_collab / chen) ----

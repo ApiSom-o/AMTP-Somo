@@ -1,7 +1,7 @@
 """Demo world: two domains, four users, a dozen fictional records.
 
 All names and records are invented for the demo. The real experiments use
-the Enron e-mail corpus instead.
+the shared arXiv dataset-v4 (datasets/arxiv/) instead.
 """
 from .adversary import Adversary
 from .anchor import RootAnchor

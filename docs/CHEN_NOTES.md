@@ -62,5 +62,6 @@ verify `O(r_C)(T_PRF + T_X)`, update `O(N_u·m)(T_PRF + T_H + T_Enc)` คอล�
 
 ## 4. ต่างจากการทดลองใน paper ต้นฉบับ
 - Paper ใช้ CAN-intrusion dataset 1,000 ไฟล์ (6,783 keyword) บน Java + JPBC, Intel i7-10700, Windows 10
-- ของเราใช้ dataset-v3 สูงสุด 200,000 ไฟล์ บน Python + `cryptography` (macOS) จึงเทียบตัวเลขกับ paper ตรง ๆ ไม่ได้
+- ของเราใช้ dataset-v4 (arXiv, 4 domain x 125,000 ไฟล์, κ = 20) บน Python + `cryptography` จึงเทียบตัวเลขกับ paper ตรง ๆ ไม่ได้
+  (ตัวเลขในหัวข้อ 3.2 เป็นผลเก่าบน dataset-v3 ไว้ดูแนวโน้มเท่านั้น)
 - ตัวเลขยังไม่ใช่ผลสุดท้าย ต้องรันซ้ำบนเครื่องที่จะรายงานใน paper

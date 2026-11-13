@@ -158,14 +158,15 @@ Defaults in the text: 4 keywords per query; reported values averaged over runs a
 These are places where the draft and the current code/data disagree or the draft is unfinished:
 
 1. **Dataset text is outdated.** Sec. V-B says Enron + synthetic replication, 10⁴–10⁶ records. The repo now
-   uses the arXiv dataset-v3 (4 domains × 50,000 + 5,000 insert pool each, RAKE κ = 10), so `N ≤ 200,000`
-   (`datasets/arxiv/README.md`). Exp. 1 sizes (5·10⁵, 10⁶) and Exp. 2/3 `N = 10⁶` need to be changed to fit,
-   or the dataset extended.
+   uses the arXiv dataset-v4 (4 domains × 125,000 + 12,500 insert pool each, RAKE κ = 20), so at most
+   125,000 files per domain and 500,000 in total (`datasets/README.md`). Exp. 1 sizes (5·10⁵, 10⁶) and
+   Exp. 2/3 `N = 10⁶` need to be changed to fit, or the dataset extended.
 2. **Setup placeholders** still open: language/version, machine, OS, libraries, hash, AEAD, signature
    scheme, DHT implementation, `n` nodes, replication `r`, number of runs/warm-up, `θ_max = [X]`,
    `θ_min = [Y]`, number of domains `[X]`.
 3. Broken figure references (`Fig. ??`) in Sec. III-A and III-C.
 4. Theorem 1 statement (86) repeats the definition of `Bad_Q` instead of stating the bound
    `Pr[Bad_Q] ≤ Adv^CR_H(B, λ)` (the bound appears only at the end of the proof, (94)).
-5. The demo in `amtp_code/` uses `θ_min = 1, θ_max = 4` to show splits on little data, and has no merge
-   or AUDC (owner side); CP-ABE and ABS are stand-ins there (see `amtp_code/README_TH.md`).
+5. The demo in `amtp_code/` uses `θ_min = 1, θ_max = 4` to show splits on little data (so a merge only
+   happens when a partition empties). It runs the full Phase 2 protocol (signed requests, Validator, Δ);
+   CP-ABE and ABS are stand-ins there (see `amtp_code/README_TH.md`).

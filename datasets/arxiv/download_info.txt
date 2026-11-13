@@ -1,5 +1,7 @@
-AMTP dataset - source information
-=================================
+AMTP dataset-v3 (old) - source information
+==========================================
+This file describes the old dataset-v3 build. The current dataset-v4 build and its source snapshot
+are described in datasets/arxiv/data_v4/download_info.txt.
 
 Source          : Kaggle - Cornell-University/arxiv  (https://www.kaggle.com/datasets/Cornell-University/arxiv)
 File            : arxiv-metadata-oai-snapshot.json

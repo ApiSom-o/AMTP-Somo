@@ -12,7 +12,7 @@ python run.py
 
 จากนั้นเปิด http://127.0.0.1:5000 ในเบราว์เซอร์
 
-ถ้าจะรันเทส: `python -m pytest -q` (ต้องผ่านทั้ง 17 ข้อ)
+ถ้าจะรันเทส: `python -m pytest -q` จากโฟลเดอร์ `amtp_code/` (ต้องผ่านทุกข้อ)
 
 ## หน้าจอมีอะไรบ้าง
 
@@ -20,10 +20,10 @@ python run.py
 |---|---|
 | **Signed in as** | เลือก user 4 คน แต่ละคนมี attribute (ใช้ถอดรหัส) กับ query key (ใช้ค้นหา) ไม่เหมือนกัน |
 | **Blockchain anchor** | Domain Root (R_D) กับ epoch ล่าสุดของแต่ละ domain และ Global Root (R_G) ซึ่ง user เชื่อแค่ค่าบนนี้ ไม่เชื่อ server |
-| ปุ่ม **Owner adds …** | จำลองว่า DO อัปโหลดไฟล์ใหม่ ทำให้ epoch เพิ่มขึ้น 1 (ถ้าไฟล์เกิน θ_max จะเกิด split) |
+| ปุ่ม **Owner adds …** | จำลองว่า DO อัปโหลดไฟล์ใหม่: DO เซ็น request (σ_op) → server เตรียม root ใหม่พร้อมหลักฐาน π^upd → Validator ของ DO ตรวจแล้วเซ็น σ_root → anchor รับ epoch ใหม่ (1 epoch = 1 batch ของ b request, ค่าเริ่มต้น b = 1; ถ้า partition เกิน θ_max จะเกิด split) |
 | **Boolean query** | พิมพ์ query เช่น `(diabetes AND insulin) OR obesity` หรือกดตัวอย่างที่เตรียมไว้ |
 | **Domains** | เลือกค้นได้หลาย domain พร้อมกัน แต่ละ domain verify แยกกันด้วย Domain Root ของตัวเอง |
-| **Cloud server behaviour** | ปุ่มสำหรับโชว์ในงานนำเสนอ ใช้สั่งให้ server โกงแบบต่างๆ |
+| **Cloud server behaviour** | ปุ่มสำหรับโชว์ในงานนำเสนอ ใช้สั่งให้ server โกงแบบต่างๆ (ผ่าน adversary plug-in `amtp/adversary.py` ตัว server เองไม่มีโค้ดโกง) |
 
 ผลของแต่ละ domain จะแสดงเป็น 4 ขั้น: Build trapdoor → Server searches → Verify proof → Decrypt
 
@@ -43,55 +43,64 @@ python run.py
 | b_papc | สร้าง ρ̂ ใหม่จาก posting list แล้วต้องเจอใน IMT | ลบรายการออกจาก posting list |
 | b_part | ทุกตำแหน่งอยู่ใน partition และทุก partition อยู่ใน domain (ASPA multiproof) | ปลอมเนื้อหาใน partition |
 | b_comp | Eval(B_Q) ที่ user คำนวณเองต้องได้ไฟล์ชุดเดียวกับที่ server ส่งมาเป๊ะ | ซ่อนไฟล์ หรือเพิ่มไฟล์ที่ไม่ตรง |
-| b_ct | H(CT) = cid | แก้ไขเนื้อไฟล์ |
+| b_ct | H(CT) = cid (CT เป็น bytes ดิบ) | แก้ไขเนื้อไฟล์ |
 
 ทุก attack ในเดโมเป็นการแก้ response จริงของ server ไม่ได้ fix ผลไว้ล่วงหน้า และมีเทสคอยเช็คว่า
-แต่ละ attack ถูกจับโดย check ที่ถูกต้อง (`tests/test_demo.py`)
+แต่ละ attack ถูกจับโดย check ที่ถูกต้อง (`tests/test_adversary.py`)
 
 ## อะไรของจริง อะไรเป็นตัวแทน (ต้องบอกกรรมการตรงๆ)
 
 | ส่วน | ในเดโม |
 |---|---|
 | AES-GCM, AES-SIV (DEnc), HMAC, SHA-256 | **ของจริง** (library `cryptography`) |
-| Merkle tree + multiproof, PAPC, IMT, non-membership proof | **ของจริง** เขียนเองทั้งหมด |
+| Merkle tree + multiproof, PAPC, IMT (มี next), non-membership proof | **ของจริง** เขียนเองทั้งหมด |
+| B+ Search Tree, Cuckoo filter | **ของจริง** ใช้ช่วยค้น keyword เท่านั้น ไม่ใช่หลักฐาน (user ตัดสินจาก hash / Merkle / signature) |
 | Partition + split ตาม θ (0 < θ_min, 2θ_min < θ_max) | **ของจริง** (θ_min=1, θ_max=4 เพื่อให้เห็น split กับข้อมูลน้อยๆ) |
 | CP-ABE | **ตัวแทน**: ห่อ key ด้วย policy tree ถ้า attribute ไม่ผ่านจะถอดไม่ได้จริง แต่ยังไม่ collusion-resistant ใน prototype ต้องเปลี่ยนเป็น Charm (FAME/BSW07) |
 | ABS | **ตัวแทน**: ใช้ Ed25519 signature ของ DO |
 | Blockchain | **จำลอง** เป็น class RootAnchor ใน Python (ตรวจ signature และ e = e*+1) ใน prototype ต้องเปลี่ยนเป็น Solidity บน local chain |
 | DHT | **จำลอง** 6 node, replica 3 ในโปรเซสเดียว |
-| ข้อมูล | ข้อความสมมติ 12 ฉบับ ส่วนการทดลองจริงใช้ Enron |
-| Index update | สร้าง index ใหม่ทั้งหมดทุก epoch เพื่อให้โค้ดอ่านง่าย ใน prototype ต้องคำนวณใหม่เฉพาะ path ที่เปลี่ยน |
-| Merge, AUDC | ยังไม่มีในเดโมนี้ เพราะเป็นฝั่ง owner |
+| ข้อมูล | ข้อความสมมติ 12 ฉบับ ส่วนการทดลองจริงใช้ arXiv dataset-v4 (`datasets/arxiv/`) |
+| Index update | **ของจริง** `Engine` ตัวเดียวกับที่ใช้ใน benchmark คำนวณใหม่เฉพาะ path ที่เปลี่ยน, Validator ของ DO ตรวจเฉพาะ dirty path ก่อนเซ็น ส่วน snapshot ที่ server ใช้ตอบ query ยังสร้างใหม่ทั้งหมดทุก epoch แล้วเทียบ R_D กับค่าแบบ incremental |
+| Merge, Δ (AUDC) | **ของจริง** Δ อยู่ในข้อความที่ DO เซ็น ส่วน merge ในเดโมเกิดเมื่อ partition ว่าง (θ_min = 1) |
 
 ## โครงสร้างไฟล์
 
 ```
 amtp/
   core/          primitive ที่ไม่มี state
-    hashing.py   H(·) และ Enc(·)
+    hashing.py   H(·), encoding แบบ binary มี tag (γ, query digest, transition, B_Q)
     merkle.py    Merkle tree + multiproof (พื้นฐานของ ASPA)
-    crypto.py    AES-GCM, AES-SIV, HMAC, Ed25519, CP-ABE stand-in
-    boolean.py   parser AND/OR + Eval
-  index.py     partition, posting list, PAPC (γ, ρ), IMT, R_D, split
-  owner.py     Phase 1–3: เข้ารหัส, สร้าง index, เซ็น, ส่ง root
-  anchor.py    Root Anchor (blockchain stand-in) + Global Root
-  dht.py       ที่เก็บ ciphertext แบบ DHT
-  server.py    Phase 4: รับ query, Eval, ASPA, และโหมดโกงต่างๆ
-  user.py      Phase 4 Step 1 (trapdoor) + Phase 5 (7 checks, ถอดรหัส)
-  scenario.py  domain, user, เอกสารสมมติ
-web/           หน้าเว็บ (Flask)
-tests/         เทส correctness gate
+    crypto.py    AES-GCM, AES-SIV, HMAC, Ed25519, CP-ABE stand-in, CT แบบ bytes
+    boolean.py   parser AND/OR + Eval + B_Q แบบ canonical
+  nlp.py         RAKE (Phase 1) และ Norm ตัวเดียวที่ใช้ทั้งตอน index และตอน query
+  engine.py      index แบบ incremental: partition, posting, PAPC (γ, ρ), IMT, R_D, split/merge, π^upd
+  variants.py    partition policy: AMTP, Static-MT, Global-MT
+  bptree.py      B+ Search Tree (order 64) สำหรับ lookup
+  cuckoo.py      Cuckoo filter สำหรับ lookup (ไม่ใช่หลักฐาน)
+  update.py      encoding ของ Phase 2: request, Aff, Δ, genesis root
+  validator.py   Validator ฝั่ง DO (Phase 2 Step 5): ตรวจ proposal ของ server แล้วเซ็น σ_root
+  index.py       DomainState: snapshot สำหรับตอบ query ของแต่ละ epoch
+  owner.py       Phase 1–2: เข้ารหัส, เซ็น request, ตรวจด้วย Validator, ส่ง root
+  anchor.py      Root Anchor (blockchain stand-in) + Global Root
+  dht.py         ที่เก็บ ciphertext แบบ DHT
+  server.py      server ที่ซื่อสัตย์: เตรียม update, รับ query, Eval, ASPA
+  adversary.py   โหมดโกงต่างๆ ของ server (ใช้ในเดโมและเทสเท่านั้น)
+  user.py        Phase 4 Step 1 (trapdoor) + Phase 5 (7 checks, ถอดรหัส)
+  scenario.py    domain, user, เอกสารสมมติ
+web/             หน้าเว็บ (Flask)
+tests/           เทส correctness gate
+bench/           ชุดการทดลอง (experiments.py, ablation.py, extraction.py)
 ```
 
 ## ต่อยอดไปเป็น experiment
 
-ตัวเลขเวลาและขนาด proof ที่โชว์ในหน้าเว็บวัดจากการรันจริง แต่**ยังเอาไปใส่ในรายงานไม่ได้**
-เพราะข้อมูลน้อยมากและยังใช้ตัวแทนบางส่วน ขั้นต่อไปคือ:
+ตัวเลขเวลาและขนาด proof ที่โชว์ในหน้าเว็บวัดจากการรันจริง แต่**เอาไปใส่ในรายงานไม่ได้**
+เพราะข้อมูลน้อยมาก ตัวเลขสำหรับรายงานมาจาก `bench/experiments.py` บน dataset-v4
+(รันทุก scheme ด้วย `scripts/aws_run_all.sh`, ซ้ำ 30 รอบ, บันทึกเป็น CSV) ขนาด proof และ response
+นับแบบ binary ด้วยกติกาเดียวกันทุก scheme (`baselines/wire_sizes.py`)
 
-1. เปลี่ยน CP-ABE และ ABS เป็นของจริง
-2. โหลด Enron
-3. เปลี่ยน index update เป็นแบบ dirty-path
-4. เขียน script benchmark ที่รันซ้ำ ≥30 รอบ แล้วบันทึกผลเป็น CSV
+ที่ยังค้าง: เปลี่ยน CP-ABE และ ABS เป็นของจริง
 
 ---
 
@@ -199,4 +208,4 @@ python -m bench.extraction --n 200000 --pool --sizes 10000 50000 100000 200000 -
   `amtp_extraction_by_n.csv` เวลารวมของทั้งชุดที่ N แต่ละค่า ; `amtp_extraction_raw.csv` รายเอกสาร ; `amtp_extraction_meta.json` สเปกเครื่อง
 - คอลัมน์ `match_csv` ต้องได้ 100% (สกัดใหม่แล้วตรงกับ documents.csv ทุกไฟล์)
 - ข้อความสำหรับ paper: *All schemes index the same documents and keyword sets W(d), extracted once with AMTP's
-  Phase 1 procedure (RAKE, κ = 10); search and update costs therefore exclude keyword extraction, which is reported separately.*
+  Phase 1 procedure (RAKE, κ = 20); search and update costs therefore exclude keyword extraction, which is reported separately.*

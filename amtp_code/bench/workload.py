@@ -2,7 +2,7 @@
 stream and queries for every variant (this is what makes the comparison fair).
 
 Document sources:
-  * arxiv_docs(n)      the shared arXiv dataset (release dataset-v3, primary dataset).
+  * arxiv_docs(n)      the shared arXiv dataset (dataset-v4, datasets/arxiv/data_v4/, primary dataset).
                        W(d) is read from documents.csv -- the same keyword sets every
                        baseline uses; nothing is re-extracted. Initial documents =
                        amtp_dataset.sample(n), fresh (inserted) documents = insert pool.

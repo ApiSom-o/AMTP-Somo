@@ -5,7 +5,7 @@ unpack.py -- rebuild the shared dataset folder from the parts committed in git.
 After `git pull`, run once from the repo root (a few minutes, standard library only):
 
     python3 datasets/arxiv/unpack.py            # dataset-v4 -> data/amtp_file_db_v4/   (default, current)
-    python3 datasets/arxiv/unpack.py --v3       # dataset-v3 -> data/amtp_file_db/      (old, kept for old results)
+    python3 datasets/arxiv/unpack.py --v3       # dataset-v3 -> data/amtp_file_db/      (old; its parts are not in NewAMTP)
 
 dataset-v4 (datasets/arxiv/data_v4/) writes:
     data/amtp_file_db_v4/files/D1_cs ... D4_condmat-quant/<0000..>/*.txt     500,000 initial documents

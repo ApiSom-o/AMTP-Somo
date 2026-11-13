@@ -1,8 +1,9 @@
 """Domain state: partitions, Search Tree postings, PAPC and IMT (Phases 2-3).
 
-Everything here is computed by the Data Owner and handed to the Cloud Server.
-For a clear demo, each epoch's state is rebuilt from scratch; the real
-prototype would recompute only the dirty Merkle paths.
+DomainState is the Cloud Server's read-only query snapshot of one finalized epoch. The Engine
+(engine.py) maintains the commitments incrementally and the owner's Validator checks each
+transition on its dirty paths; Engine.snapshot() then rebuilds this snapshot in full and the
+server checks that its R_D equals the incremental one.
 """
 import re
 from dataclasses import dataclass, field
