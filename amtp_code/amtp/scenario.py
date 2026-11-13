@@ -4,7 +4,7 @@ All names and records are invented for the demo. The real experiments use
 the Enron e-mail corpus instead.
 """
 from .anchor import RootAnchor
-from .crypto import AttributeAuthority
+from .core.crypto import AttributeAuthority
 from .owner import DataOwner, DomainKeys
 from .server import CloudServer
 from .user import DataUser
@@ -117,7 +117,7 @@ class World:
 
     def plaintext_answer(self, domain, text):
         """Ground truth for tests only: run the Boolean query on plaintext keywords."""
-        from . import boolean
+        from .core import boolean
         from .index import extract_keywords
         published = [_doc(t) for t in DOCS[domain] + PENDING[domain]
                      if t[0] not in {p["id"] for p in self.pending[domain]}]

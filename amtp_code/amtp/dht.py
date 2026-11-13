@@ -7,7 +7,7 @@ Cloud Server must raise StorageError instead of returning a partial result.
 import bisect
 import copy
 
-from .hashing import H, enc
+from .core.hashing import H, enc
 
 
 class StorageError(Exception):

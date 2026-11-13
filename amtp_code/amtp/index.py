@@ -8,8 +8,8 @@ import copy
 import re
 from dataclasses import dataclass, field
 
-from .hashing import H, enc
-from .merkle import MerkleTree, merkle_root
+from .core.hashing import H, enc
+from .core.merkle import MerkleTree, merkle_root
 
 EMPTY_SLOT = b""
 SENTINEL_LO = b"\x00" * 32

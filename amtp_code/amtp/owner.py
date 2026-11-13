@@ -2,9 +2,9 @@
 import os
 
 from .anchor import transition_message
-from .crypto import Signer, aes_gcm_encrypt, keyword_cipher
+from .core.crypto import Signer, aes_gcm_encrypt, keyword_cipher
 from .dht import ciphertext_id
-from .hashing import H, enc
+from .core.hashing import H, enc
 from .index import DomainState, PartitionLayout, extract_keywords
 
 

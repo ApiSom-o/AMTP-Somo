@@ -5,7 +5,7 @@ import time
 
 from flask import Flask, jsonify, render_template, request
 
-from amtp.boolean import ParseError
+from amtp.core.boolean import ParseError
 from amtp.scenario import DOMAINS, EXAMPLE_QUERIES, World
 from amtp.server import ATTACKS
 

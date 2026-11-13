@@ -67,10 +67,11 @@ python run.py
 
 ```
 amtp/
-  hashing.py   H(·) และ Enc(·)
-  merkle.py    Merkle tree + multiproof (พื้นฐานของ ASPA)
-  crypto.py    AES-GCM, AES-SIV, HMAC, Ed25519, CP-ABE stand-in
-  boolean.py   parser AND/OR + Eval
+  core/          primitive ที่ไม่มี state
+    hashing.py   H(·) และ Enc(·)
+    merkle.py    Merkle tree + multiproof (พื้นฐานของ ASPA)
+    crypto.py    AES-GCM, AES-SIV, HMAC, Ed25519, CP-ABE stand-in
+    boolean.py   parser AND/OR + Eval
   index.py     partition, posting list, PAPC (γ, ρ), IMT, R_D, split
   owner.py     Phase 1–3: เข้ารหัส, สร้าง index, เซ็น, ส่ง root
   anchor.py    Root Anchor (blockchain stand-in) + Global Root

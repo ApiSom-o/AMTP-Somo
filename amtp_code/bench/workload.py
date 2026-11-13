@@ -17,7 +17,7 @@ import sqlite3
 import sys
 from email import policy as email_policy
 
-from amtp.hashing import H, enc
+from amtp.core.hashing import H, enc
 from amtp.dht import ciphertext_id
 from amtp.index import extract_keywords
 

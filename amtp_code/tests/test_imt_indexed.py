@@ -3,10 +3,10 @@ absent evidence must verify, after any mix of key additions and removals."""
 import json
 import random
 
-from amtp import boolean
+from amtp.core import boolean
 from amtp.dht import DHT
 from amtp.engine import Engine
-from amtp.hashing import H
+from amtp.core.hashing import H
 from amtp.server import _absent_evidence, build_response
 from amtp.user import DataUser
 from amtp.variants import AdaptivePolicy
