@@ -37,6 +37,7 @@ import textwrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+from matplotlib.ticker import FuncFormatter  # noqa: E402
 from plot_results import (EXP4_STYLE, INK, INK2, NAME, STYLE, SURFACE, new_fig, ok, paper_line,  # noqa: E402
                           plt, rq_axis)
 
@@ -110,6 +111,8 @@ def save(fig, ax, path, title, fixed, xlabel, ylabel, log_y=True, log_x=False, t
         return
     if log_x:
         rq_axis(ax, ticks)
+        if ticks and min(ticks) >= 1000:                    # 10k, 25k, ... : large sizes never overlap
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v / 1000:g}k"))
     elif ticks:
         ax.set_xticks(ticks)
     if log_y:

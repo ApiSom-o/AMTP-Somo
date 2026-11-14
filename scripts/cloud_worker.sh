@@ -35,7 +35,7 @@ job_env() {
     multi-se)        echo 'SCHEMES=secollab|xsearch xverify xdomains' ;;
     update)          echo '|update' ;;
     exp5)            echo '|exp5' ;;
-    sm64|sm128|sm256) echo "SM_THETAS=${1#sm}|splitmerge" ;;
+    sm64|sm128|sm256) echo "SM_RUNS=1 SM_THETAS=${1#sm}|splitmerge" ;;   # with v: 1 run (Static-MT is slow); run 0 pairs with nov run 0
     nov-update)      echo 'AMTP_GAMMA_V=0 SCHEMES=amtp|update' ;;
     nov-exp5)        echo 'AMTP_GAMMA_V=0 SCHEMES=amtp|exp5' ;;
     nov-sm64|nov-sm128|nov-sm256) echo "AMTP_GAMMA_V=0 SM_THETAS=${1#nov-sm}|splitmerge" ;;
