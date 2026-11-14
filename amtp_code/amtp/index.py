@@ -5,6 +5,7 @@ DomainState is the Cloud Server's read-only query snapshot of one finalized epoc
 transition on its dirty paths; Engine.snapshot() then rebuilds this snapshot in full and the
 server checks that its R_D equals the incremental one.
 """
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -45,10 +46,31 @@ class Partition:
         return MerkleTree(self.slots)
 
 
+# γ with or without the partition version v (study B4). Default: with v, the paper's definition.
+# AMTP_GAMMA_V=0 in the environment (or set_gamma_v(False) before any Engine / Validator / DataUser is built)
+# gives γ = H(PID ‖ H(Enc(L))): a version bump then changes only the partition leaf A_j, not every γ of the
+# partition. Server, Validator and user must use the same setting (one process, one setting).
+_GAMMA_V = os.environ.get("AMTP_GAMMA_V", "1") != "0"
+
+
+def set_gamma_v(on: bool) -> None:
+    global _GAMMA_V
+    _GAMMA_V = bool(on)
+
+
+def gamma_has_v() -> bool:
+    return _GAMMA_V
+
+
+def gamma_inner(pid: str, v: int, inner: bytes) -> bytes:
+    """γ from its inner hash H(Enc(L)): H(PID ‖ v ‖ inner), or H(PID ‖ inner) when γ leaves v out"""
+    return H(pid, v, inner) if _GAMMA_V else H(pid, inner)
+
+
 def gamma(pid: str, v: int, component) -> bytes:
     """γ_{w,j} = H(PID ‖ v ‖ H(Enc(L_{w,j}))) with the binary posting encoding enc_posting
-    (entries (cid, ℓ) in slot order; cid as bytes or hex)."""
-    return H(pid, v, H(enc_posting(component)))
+    (entries (cid, ℓ) in slot order; cid as bytes or hex). Without v: see set_gamma_v."""
+    return gamma_inner(pid, v, H(enc_posting(component)))
 
 
 def rho(h: bytes, n_sel: int, r_post: bytes) -> bytes:

@@ -1506,7 +1506,7 @@ def suite_exp5(args):
     และตรวจว่า root ของ owner เดิมบน ledger ไม่เปลี่ยนเมื่อเพิ่ม owner ใหม่"""
     D = dataset()
     meta, groups, queries, _ = D.load_exp5_workload(args.exp5_workload, args.data)
-    counts = [d for d in meta["domain_counts"] if d <= len(groups)]
+    counts = [d for d in meta["domain_counts"] if d <= len(groups) and d in args.d_counts]
     inv = D.inverted_index(groups[0])
     universe = set(range(len(groups[0])))
     print(f"[exp5] multi-owner  D={counts} per-domain={meta['per_domain']} queries={len(queries)}")
@@ -1531,9 +1531,10 @@ def suite_exp5(args):
                     N_total=nd * meta["per_domain"])
         for q in queries:
             ast = bool_parse(q["query"])
-            res, qi = measure(s, dss[0], du, q["query"], args.reps, args.warmup)
+            res, qi = measure(s, dss[0], du, q["query"], args.reps, args.warmup, args.proof_mode)
             assert qi.pop("ids") == bool_eval_sets(ast, inv, universe), f"ผลไม่ตรง ground truth: {q['query']}"
-            w.add(**base, kQ=q["kQ"], q=q["q"], shape=q["shape"], op="query", status="ok", rQ=qi["rQ"],
+            w.add(**base, kQ=q["kQ"], q=q["q"], shape=q["shape"], op="query", status="ok", proof_mode=args.proof_mode,
+                  rQ=qi["rQ"],
                   proof_bytes=qi["proof_bytes"], response_bytes=qi["response_bytes"], **res)
         w.add(**base, op="update_one_domain", update_kind="none", status="N/A")
     w.close()
@@ -1565,22 +1566,27 @@ def suite_search1(args):
     ผลของทุก query ต้องเท่ากับ result_size ในไฟล์และ ground truth จาก plaintext"""
     D = dataset()
     qs = D.search_single_queries()
-    print(f"[search1] domains={args.s_domains} files/domain={args.fpd} queries={len(qs)}")
+    plan = D.search1_points(qs, args.fpd, args.fix, args.s1_kq, args.all_points)
+    print(f"[search1] domains={args.s_domains} files/domain={args.fpd} queries={len(qs)} "
+          f"points={sum(map(len, plan.values()))} proof={args.proof_mode}")
     w = Writer("search_single", args.out)
     for dname in args.s_domains:
         for n in args.fpd:
+            mine = [q for q in plan[n] if q["domain"] == dname]
+            if not mine:
+                continue
             src = D.domain_docs(dname, n, args.data)
             inv = D.inverted_index(src)
             s, ds, du, tim = setup(to_secollab(src, args.data), dense_threshold=args.dense_threshold)
             print_setup(n, ds, tim)
-            for q in (q for q in qs if q["domain"] == dname):
+            for q in mine:
                 ast = bool_parse(q["text"])
-                res, qi = measure(s, ds, du, q["text"], args.reps, args.warmup)
+                res, qi = measure(s, ds, du, q["text"], args.reps, args.warmup, args.proof_mode)
                 ids = qi.pop("ids")
                 assert len(ids) == q["result_size"][str(n)] and ids == bool_eval_sets(ast, inv, set(range(n))), \
                     f"ผลไม่ตรง: {q['query_id']} n={n}"
                 w.add(scheme="SE-COLLAB[37]", domain=dname, N=n, query_id=q["query_id"], kQ=q["kQ"], shape=q["shape"],
-                      status="ok", rQ=qi["rQ"], pQ=sum(len(inv.get(t, ())) for t in bool_keywords(ast)),
+                      status="ok", proof_mode=args.proof_mode, rQ=qi["rQ"], pQ=sum(len(inv.get(t, ())) for t in bool_keywords(ast)),
                       proof_bytes=qi["proof_bytes"], response_bytes=qi["response_bytes"], **res)
             del s, ds, du, src, inv
             gc.collect()
@@ -2057,6 +2063,9 @@ def main():
     ap.add_argument("--s-domains", nargs="+", default=list(Dm.DOMAINS), help="v4 single-domain suites: domain")
     ap.add_argument("--fpd", type=int, nargs="+", default=Dm.V4_SIZES, help="search1: จำนวนไฟล์ต่อ domain")
     ap.add_argument("--fix", type=int, default=Dm.V4_FIX, help="verify1 / xsearch / xverify / xdomains: ไฟล์ต่อ domain")
+    ap.add_argument("--s1-kq", type=int, default=Dm.S1_KQ, help="search1: k_Q run at every size (Search 1.2)")
+    ap.add_argument("--all-points", action="store_true",
+                    help="search1: every query at every size (default: only the points of Search 1.1 / 1.2)")
     ap.add_argument("--d-counts", type=int, nargs="+", default=Dm.D_COUNTS, help="xdomains: จำนวน domain")
     ap.add_argument("--max-queries", type=int, default=0, help="xdomains: ใช้ query n ตัวแรก (0 = ทั้งหมด)")
     ap.add_argument("--x-kq", type=int, nargs="+", default=None, help="xdomains: เฉพาะ kQ เหล่านี้ (ค่าเริ่มต้น ทุกค่า)")

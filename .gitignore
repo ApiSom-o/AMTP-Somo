@@ -228,3 +228,6 @@ enron_mail_*.tar.gz
 arxiv-metadata-oai-snapshot.json
 amtp_file_db*.zip
 
+
+# experiment runs (never commit results)
+baselines/results/runs/
