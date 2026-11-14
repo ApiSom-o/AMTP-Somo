@@ -1,6 +1,6 @@
 """Turn benchmark CSVs into figures (PNG for slides, PDF for the LaTeX paper).
 
-    python -m bench.plot results_exp4
+    python -m bench.old.plot results_exp4
 
 Every point is a median with a 95% bootstrap confidence interval.
   * With several runs: each run is first reduced to its own median, and the

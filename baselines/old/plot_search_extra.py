@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extra single-domain search figures (search1), trial set next to the plan figures.
 
-    python3 plot_search_extra.py --results ../new_result --out ../new_result/test
+    python3 old/plot_search_extra.py --results ../new_result --out ../new_result/test
 
 Writes <out>/ex1_search/:
   server_vs_kQ, server_vs_files       server (cloud) time per query, every scheme
@@ -15,8 +15,9 @@ import os
 import statistics
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # baselines/ (this script now lives in baselines/old/)
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "old"))
 from plot_results import (INK, INK2, NAME, STYLE, load, ok, paper_fig, paper_finish, paper_line, plt,  # noqa: E402
                           rq_axis)
 

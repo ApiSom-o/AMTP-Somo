@@ -162,9 +162,9 @@ Tested on macOS with Python 3.12 (`brew install gmp pbc`, then pip as above). On
 pip install matplotlib
 python3 plot_results.py secollab              # results/secollab/figures/secollab_*.png / .pdf
 python3 plot_results.py amtp chen du secollab # + results/compare/: every scheme of an experiment in one graph
-python3 plot_v4.py                            # dataset-v4 suites + split / merge -> results/figures_v4/
+python3 old/plot_v4.py                        # (old) dataset-v4 suites + split / merge -> results/figures_v4/
 ```
-**dataset-v4 figures (`plot_v4.py`)**, from the CSVs of `scripts/aws_run_all.sh` (`--results <dir>` if they were
+**dataset-v4 figures (`old/plot_v4.py`, replaced by `plot_paper.py`)**, from the CSVs of `scripts/aws_run_all.sh` (`--results <dir>` if they were
 copied elsewhere). One folder per item of the advisor's plan, every title starts with that item:
 `Search_1.1_single_domain_vary_keywords/` (time, verification and response size vs k_Q at `--fix` files),
 `Search_1.2_single_domain_vary_files/` (vs files at k_Q = `--kq`), `Verify_1.1_single_domain_vary_results/`,
@@ -187,7 +187,7 @@ Schemes that cannot take part are named in the note under the figure (N/A). Size
 | 4 | `compare_exp4*_update_vs_skew`, `compare_exp4*_verify_vs_skew` (AMTP vs Static-MT / Global-MT / Global-MT(v)) |
 | 5 | `compare_exp5_query_vs_domains` (AMTP, SE-COLLAB), `compare_exp5_update_vs_domains` (AMTP; SE-COLLAB N/A) |
 
-Same style for every scheme (palette of `amtp_code/bench/plot.py`): median of `--reps` runs, error bars ±1 std,
+Same style for every scheme (palette of `amtp_code/bench/old/plot.py`): median of `--reps` runs, error bars ±1 std,
 PNG for slides and PDF for the paper. Figures: `exp1_search_vs_N` (AND, one line per k_Q), `exp1_shapes_vs_N`
 (all Boolean shapes at k_Q = 4, schemes with OR support), `exp1_breakdown_maxN` (stacked phases at the largest N),
 `exp2_verify_vs_rQ` (clustered / dispersed), `exp3_insert_vs_batch` (insert time per file, one line per N) and, for
