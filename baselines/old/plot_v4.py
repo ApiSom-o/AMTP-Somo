@@ -5,8 +5,8 @@ Figures for the advisor's plan on dataset-v4: the suites of scripts/aws_run_all.
 (search1, verify1, tamper, xsearch, xverify, xdomains) and the split / merge runs of bench.ablation
 (results/amtp/splitmerge_*/). Same colours, markers and layout as the compare_* figures of plot_results.py.
 
-  python3 plot_v4.py                                   # every figure whose CSVs exist -> results/figures_v4/
-  python3 plot_v4.py --results <dir> --out <dir> --note "AWS r7i.4xlarge"
+  python3 old/plot_v4.py                                   # every figure whose CSVs exist -> results/figures_v4/
+  python3 old/plot_v4.py --results <dir> --out <dir> --note "AWS r7i.4xlarge"
 
 Each point = median over the queries (or keywords) of that point, where each query's value is already the median of
 --reps runs (<metric>_ms_median). Error bars = 25th-75th percentile across those queries (a point with one query:
@@ -25,8 +25,9 @@ import os
 import statistics
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # baselines/ (this script now lives in baselines/old/)
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "old"))
 from plot_results import (AXIS, EXP4_STYLE, INK, INK2, KB, NAME, STYLE, SURFACE, load, new_fig,  # noqa: E402
                           ok, paper_fig, paper_finish, paper_line, plt, rq_axis)
 

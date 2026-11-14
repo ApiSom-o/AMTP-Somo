@@ -174,7 +174,7 @@ python -m bench.ablation --source enron --enron ./maildir --n 100000 \
 ## ทำกราฟ
 
 ```bash
-python -m bench.plot results_exp4
+python -m bench.old.plot results_exp4   # สคริปต์เก่า ย้ายไป bench/old/ แล้ว; กราฟของ paper ใช้ baselines/plot_paper.py
 ```
 
 กราฟจะอยู่ใน `results_exp4/figures/` แยกกราฟละ 1 metric มีทั้ง `.png` (ไว้ใส่สไลด์) และ `.pdf` (ไว้ใส่ LaTeX)

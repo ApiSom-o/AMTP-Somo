@@ -2,7 +2,7 @@
 """The 'today' figure set: one folder per experiment, PNG only, and the note under each figure lists only the
 values that are held fixed.
 
-    python3 plot_today.py --results ../new_result --old ../results_aws --out ../new_result/today
+    python3 old/plot_today.py --results ../new_result --old ../results_aws --out ../new_result/today
 
 ex1_search     server time (search + proof) per query        run 2 (new_result)
 ex2_verify     user verification time                        run 2
@@ -16,8 +16,9 @@ import os
 import statistics
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # baselines/ (this script now lives in baselines/old/)
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "old"))
 import plot_v4 as v4  # noqa: E402
 from plot_results import EXP4_STYLE, INK, INK2, KB, NAME, STYLE, SURFACE, AXIS, load, ok, paper_fig, plt, rq_axis  # noqa: E402,F401
 

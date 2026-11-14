@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify 1.2 as accuracy: how correct is what the user accepts WITHOUT a warning when the server cheats.
 
-    python3 plot_accuracy.py --results ../new_result --out <folder>
+    python3 old/plot_accuracy.py --results ../new_result --out <folder>
 
 Per run of the tamper suite (the server changes t of the ~2,000 results r):
   * the check fails (detected_runs)            -> the user is warned and accepts nothing wrong silently: 100 %
@@ -20,8 +20,9 @@ import os
 import statistics
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # baselines/ (this script now lives in baselines/old/)
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "old"))
 from plot_results import NAME, STYLE, load, paper_fig, paper_finish, paper_line, rq_axis  # noqa: E402
 
 KINDS = {"hide": ("Server hides t files", "Recall of the accepted result (%)"),
