@@ -54,3 +54,28 @@ ex3 (update cost) บน cloud แบบ γ มี v: ไฟล์ต่อ epoc
 - **ex3 AMTP แบบ γ มี v ต้องรันใหม่** (Chen ไม่ใช้ Validator นี้ ใช้ผลเดิม; แบบไม่มี v ไม่ได้เลือกแล้ว — ถ้าจะใช้ในภาคผนวกต้องรันใหม่หรือกำกับว่าเป็นผลก่อนแก้)
 - ex1, ex2, ex4, ex5 ไม่กระทบ (ex4 วัดเฉพาะ CS; ex5 ใช้ b = 1 ซึ่งแทบไม่เข้าลูปนี้)
 - รันใหม่บน cloud: `bench.experiments exp3 --reps 15 --warmup 3 --sizes 100000 --batches 1 10 100 1000` (เหมือนรอบเดิม) ลงโฟลเดอร์ `paper_v_exp3fix`
+
+## ผลหลังแก้
+
+### Mac (N = 100k, b = 1000, γ มี v, insert + delete 1 รอบ)
+
+| | ก่อนแก้ | หลังแก้ |
+|---|---|---|
+| Validator, insert | 401 s | 27.6 s |
+| Validator, delete | 468 s | 16.6 s |
+| update ทั้งหมด, insert | 486 s | 51.8 s |
+| update ทั้งหมด, delete | 552 s | 42.6 s |
+
+### Cloud (r7i.4xlarge, w4, commit a131032, `git_dirty: false`, 15 รอบ หลัง warm-up 3 รอบ, median ต่อ epoch)
+
+| b | op | CS ก่อน → หลัง | Validator ก่อน → หลัง | update ทั้งหมด ก่อน → หลัง |
+|---|---|---|---|---|
+| 1 | insert | 79 → 81 ms | 60 → 60 ms | 142 → 141 ms |
+| 10 | insert | 709 → 703 ms | 589 → 551 ms | 1.30 → 1.25 s |
+| 100 | insert | 5.17 → 5.16 s | 7.6 → 4.2 s | 12.8 → 9.4 s |
+| 1000 | insert | 34.3 → 34.2 s | **597 → 41.9 s** | **632 → 76.4 s** |
+| 1000 | delete | 40.6 → 40.5 s | **421 → 23.3 s** | **462 → 63.6 s** |
+
+- เวลา CS เกือบเท่าเดิมทุกจุด แสดงว่าเครื่องเร็วพอกับรอบเดิม เทียบกันได้
+- หลังแก้ ต้นทุน update โตตาม b แบบเส้นตรง
+- ผลใหม่อยู่ใน `baselines/results/new_amtp_result/gamma_with_v/amtp/amtp_exp3_dynamic_update.csv` ส่วนผลเดิมย้ายไปที่ `amtp/old_before_validator_fix/` รูป ex3 plot ใหม่แล้ว (merge ไปพร้อม PR #10)
