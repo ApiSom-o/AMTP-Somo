@@ -33,6 +33,47 @@ class Invalid(Exception):
     """The proposed transition is not authorized; the reason says which check failed."""
 
 
+# ---------------------------------------------------------------- IMT next-pointer checks
+# touched: key -> (IMT position, ρ, next) of every IMT leaf the evidence opens. Both checks decide exactly
+# what the direct scans decide (every leaf against every key), with the same messages, in O((n + m) log n)
+# instead of O(n · m): at b = 1000 with v in γ, n ≈ 4·10^5 opened leaves made the scans take minutes.
+
+def check_removed_predecessors(touched, removed):
+    """Every removed key must be the next pointer of some opened leaf (its predecessor is in the evidence)."""
+    nexts = {nx for _, _, nx in touched.values()}
+    for r in removed:
+        if r not in nexts:
+            raise Invalid("the predecessor of a removed key is missing")
+
+
+def bracket_new_keys(touched, added):
+    """For every new key a: the one opened leaf h with h < a < next(h). Invalid unless there is exactly one.
+    Leaves sorted by h; for each prefix keep the largest and the second largest next. The leaves with h < a
+    are a prefix; a lies in the range of one of them iff that prefix's largest next is > a, of two or more
+    iff its second largest next is > a too, and when it is exactly one, that leaf holds the largest next."""
+    items = sorted((h, nx) for h, (_, _, nx) in touched.items())
+    hs = [h for h, _ in items]
+    top = []                                   # per prefix: (index of the largest next, second largest next)
+    best = second = None
+    for j, (_, nx) in enumerate(items):
+        if best is None or nx > items[best][1]:
+            best, second = j, (None if best is None else items[best][1])
+        elif second is None or nx > second:
+            second = nx
+        top.append((best, second))
+    bracket = {}
+    for a in added:
+        i = bisect.bisect_left(hs, a)          # items[:i] are the leaves with h < a
+        count, j = 0, None
+        if i:
+            j, second = top[i - 1]
+            count = (items[j][1] > a) + (second is not None and second > a)
+        if count != 1:
+            raise Invalid("a new key is not bracketed by exactly one predecessor leaf")
+        bracket[a] = items[j][0]
+    return bracket
+
+
 class _Model:
     """The validator's working copy of the partition layout for one candidate transition.
     It offers the interface the partition policies use (parts, live, live_entries, split, merge),
@@ -512,15 +553,8 @@ class Validator:
             raise Invalid("IMT opening does not match R^idx")
 
         # next pointers of the successor state
-        for r in removed:
-            if not any(nx == r for _, _, nx in touched.values()):
-                raise Invalid("the predecessor of a removed key is missing")
-        bracket = {}
-        for a in added:
-            lo = [h for h, (_, _, nx) in touched.items() if h < a < nx]
-            if len(lo) != 1:
-                raise Invalid("a new key is not bracketed by exactly one predecessor leaf")
-            bracket[a] = lo[0]
+        check_removed_predecessors(touched, removed)
+        bracket = bracket_new_keys(touched, added)
         add_sorted = sorted(added)
 
         def first_live(y):
