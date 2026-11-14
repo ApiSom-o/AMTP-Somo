@@ -1,18 +1,21 @@
-"""Story figures for the paper, from one merged run folder (default: the γ-with-v cloud run).
+"""Story figures for the paper, from one merged run folder (default: the γ-with-v cloud run). Line charts only.
 
     .venv/bin/python baselines/plot_story.py                     # -> results/new_amtp_result/graph_op/
     .venv/bin/python baselines/plot_story.py --run <dir> --out <dir>
 
-  1. attack_detection    which scheme detects which attack, over every run (tamper_detection CSVs)
-  2. proof_size_vs_rq    proof size against the number of returned files r_Q (verify_single CSVs)
-  3. e2e_breakdown       where the end-to-end time of one query goes, per scheme (search_single CSVs)
-  4. amtp_verify_checks  AMTP's verification time split over its checks (same point as 3)
-  5. proof_size_vs_rq_4domains   proof size against r_Q, query over 4 domains (verify_multi CSVs)
-  6. e2e_vs_rq                   end-to-end time against r_Q, with the AMTP / SE-COLLAB crossover
-  7. query_vs_domains            query time against the number of deployed domains (exp5_domains)
-  8. update_vs_domains           AMTP update of one domain against the number of domains (exp5_domains)
-  9. max_partition_vs_batch      largest partition over the update stream, AMTP vs Static-MT (θ_max = 64)
- 10. update_vs_batch             update time over the same stream, AMTP vs Static-MT
+graph_op/main/    the paper's story: AMTP against every scheme the figure compares
+  detection_vs_tampered      attack types detected against the number of tampered files (tamper_detection)
+  proof_size_vs_rq           proof size against r_Q, one domain (verify_single)
+  proof_size_vs_rq_4domains  proof size against r_Q, query over 4 domains (verify_multi)
+  query_vs_domains           query time against the number of deployed domains (exp5_domains)
+  update_vs_domains          AMTP update of one domain against the number of domains (exp5_domains)
+  max_partition_vs_batch     largest partition over the update stream, AMTP vs Static-MT (θ_max = 64)
+  update_vs_batch            update time over the same stream, AMTP vs Static-MT
+graph_op/limits/  where a baseline is faster (for the discussion), each labelled with what that baseline misses
+  e2e_vs_rq                  end-to-end time against r_Q, with the AMTP / SE-COLLAB crossover
+  e2e_vs_files               end-to-end time against N (search_single)
+  server_vs_files            server time against N (search_single)
+  e2e_vs_kq                  end-to-end time against k_Q at N = 100,000 (search_single)
 
 Statistics as plot_paper.py: each query's value is the median of its timed runs; a point is the median
 over its queries. Sizes in KB = 1000 B. Colours and markers of the schemes come from plot_results.py.
@@ -32,12 +35,7 @@ sys.path.insert(0, HERE)
 from plot_results import (AXIS, EXP4_STYLE, INK, INK2, KB, NAME, STYLE, SURFACE, FixedLocator,
                           FuncFormatter, new_fig, plt, rq_axis)  # noqa: E402
 
-SCHEMES = ("amtp", "chen", "du", "secollab")
-ATTACKS = [("none", "Honest response\n(no false alarm)"), ("modify", "Modified file"),
-           ("hide", "Hidden result"), ("inject", "Injected result"), ("old_version", "Old file version")]
-CHECK_NAME = {"ct": "ct", "comp": "comp", "papc": "papc", "part": "part", "idx": "idx", "anchor": "anchor",
-              "ctx": "ctx"}
-GOOD, BAD, NA = "#d9efe3", "#f8dcd8", "#ecebe7"          # cell fills; the ✓ / ✗ / N/A text carries the meaning
+SCHEMES = ("amtp", "secollab", "du", "chen")
 
 
 def rows(run, scheme, suite):
@@ -78,61 +76,7 @@ def save(fig, ax, out, name, title, fixed, note_below=False):
     print("->", os.path.relpath(path))
 
 
-# ---------------------------------------------------------------- 1. attack detection
-def attack_detection(run, out, points):
-    table = {}
-    for s in SCHEMES:
-        agg = collections.defaultdict(lambda: {"det": 0, "runs": 0, "na": False, "checks": set(), "dom": set()})
-        for x in rows(run, s, "tamper_detection"):
-            a = agg[x["tamper"]]
-            a["dom"].add(x["domain"])
-            if x["status"] != "ok":
-                a["na"] = True
-                continue
-            a["det"] += int(x["detected_runs"] or 0)
-            a["runs"] += int(x["runs"] or 0)
-            if x.get("failed_check"):
-                a["checks"].add(x["failed_check"])
-        table[s] = agg
-    fig, ax = new_fig(7.6, 5.2)
-    ax.grid(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_visible(False)
-    ax.set_xlim(-0.5, len(SCHEMES) - 0.5)
-    ax.set_ylim(len(ATTACKS) - 0.5, -0.5)
-    for j, s in enumerate(SCHEMES):
-        for i, (key, _) in enumerate(ATTACKS):
-            a = table[s].get(key)
-            if a is None or (a["na"] and not a["runs"]):
-                fill, text = NA, "N/A"
-            elif key == "none":                                   # honest: the good outcome is "nothing flagged"
-                false = a["det"]
-                fill, text = (GOOD, f"✓ 0 / {a['runs']}") if false == 0 else (BAD, f"✗ {false} / {a['runs']}")
-            else:
-                rate = a["det"] / a["runs"]
-                mark = "✓" if rate == 1 else "✗"
-                fill = GOOD if rate == 1 else BAD
-                text = f"{mark} {rate:.0%}"
-                if a["checks"]:
-                    text += "\ncheck: " + ", ".join(sorted(CHECK_NAME.get(c, c) for c in a["checks"]))
-            ax.add_patch(plt.Rectangle((j - 0.47, i - 0.44), 0.94, 0.88, facecolor=fill, edgecolor=SURFACE,
-                                       linewidth=2))
-            ax.text(j, i, text, ha="center", va="center", fontsize=10, color=INK)
-            points.append(("attack_detection", NAME[s], key, text.replace("\n", " ")))
-    ax.set_xticks(range(len(SCHEMES)))
-    ax.set_xticklabels([NAME[s] for s in SCHEMES], fontsize=10.5, color=INK)
-    ax.xaxis.tick_top()
-    ax.set_yticks(range(len(ATTACKS)))
-    ax.set_yticklabels([lab for _, lab in ATTACKS], fontsize=10, color=INK)
-    ax.tick_params(length=0)
-    runs = table["amtp"]["modify"]["runs"]
-    save(fig, ax, out, "attack_detection", "Only AMTP detects every attack, with no false alarm",
-         f"one domain of 100,000 files · keyword with 2,021 results · t = 5…1000 files changed · "
-         f"domains D1–D4 · {runs} attacked responses per cell · ✓ = detected in every run; "
-         f"N/A = Chen returns no files, so a file cannot be modified or replaced", note_below=True)
-
-
-# ---------------------------------------------------------------- 2. proof size
+# ---------------------------------------------------------------- proof size
 def proof_size(run, out, points):
     fig, ax = new_fig(6.6, 5.0)
     ticks = []
@@ -167,82 +111,6 @@ def proof_size(run, out, points):
          f"and {du / a:.0f}× smaller than Du's",
          "single keyword · one domain of 100,000 files · median over domains D1–D4 · "
          "Chen [40] records no separate proof object (0 B), so it is not shown")
-
-
-# ---------------------------------------------------------------- 3. end-to-end breakdown
-PARTS = [("query_gen_ms", "Query generation (DU)", "#c9c6bf"),
-         ("server_total_ms", "Search + proof (server)", "#8a8985"),
-         ("verify_total_ms", "Verification (DU)", "#2a78d6"),
-         ("du_decrypt_ms", "Decrypt / decode (DU)", "#dcd9d2")]
-
-
-def point_rows(run, s, kq="5", n="100000"):
-    return [x for x in rows(run, s, "search_single") if x["kQ"] == kq and x["N"] == n
-            and x.get("status", "ok") == "ok"]
-
-
-def e2e_breakdown(run, out, points):
-    order = ["du", "chen", "secollab", "amtp"]                # bottom → top: AMTP on top
-    fig, ax = new_fig(7.4, 4.4)
-    ax.grid(axis="y", visible=False)
-    totals = {}
-    for i, s in enumerate(order):
-        sel = point_rows(run, s)
-        left = 0.0
-        for col, label, color in PARTS:
-            v = med([num(x, col) for x in sel]) if sel and col + "_median" in sel[0] else None
-            if not v:
-                continue
-            ax.barh(i, v, left=left, height=0.56, color=color, edgecolor=SURFACE, linewidth=2,
-                    label=label if i == len(order) - 1 or label not in ax.get_legend_handles_labels()[1] else None)
-            points.append(("e2e_breakdown", NAME[s], label, v))
-            left += v
-        total = med([num(x, "end_to_end_ms") for x in sel])
-        totals[s] = total
-        ax.text(max(left, total) + 0.15, i, f"{total:.1f} ms", va="center", fontsize=9.5, color=INK)
-        points.append(("e2e_breakdown", NAME[s], "end_to_end", total))
-    ax.set_yticks(range(len(order)))
-    ax.set_yticklabels([NAME[s] for s in order], fontsize=10.5, color=INK)
-    ax.set_xlim(0, max(totals.values()) * 1.18)
-    ax.set_xlabel("Time per query (ms)", color=INK2, fontsize=11.5)
-    handles, labels = ax.get_legend_handles_labels()
-    uniq = dict(zip(labels, handles))
-    ax.legend(uniq.values(), uniq.keys(), frameon=False, fontsize=9, loc="lower right")
-    amtp = point_rows(run, "amtp")
-    v = med([num(x, "verify_total_ms") for x in amtp])
-    save(fig, ax, out, "e2e_breakdown",
-         f"{v / totals['amtp']:.0%} of AMTP's query time is verification — the checks that prove completeness",
-         "conjunctive query, k_Q = 5 · one domain of 100,000 files · median over 80 queries (4 domains × 20) · "
-         "AMTP's verification covers every posting of every query key, not only the returned files")
-
-
-# ---------------------------------------------------------------- 4. AMTP verification by check
-CHECKS = [("verify_part_ms", "part — partition positions\n(multiproofs)"),
-          ("verify_papc_ms", "papc — rebuild every\nposting commitment"),
-          ("verify_idx_ms", "idx — Index Merkle Tree"),
-          ("verify_ct_ms", "ct — ciphertext hashes"),
-          ("verify_comp_ms", "comp — exact Boolean result")]
-
-
-def amtp_checks(run, out, points):
-    sel = point_rows(run, "amtp")
-    vals = [(label, med([num(x, col) for x in sel])) for col, label in CHECKS]
-    total = med([num(x, "verify_total_ms") for x in sel])
-    fig, ax = new_fig(7.2, 4.3)
-    ax.grid(axis="y", visible=False)
-    ys = list(range(len(vals)))[::-1]
-    for y, (label, v) in zip(ys, vals):
-        ax.barh(y, v, height=0.56, color=STYLE["amtp"][0], edgecolor=SURFACE, linewidth=2)
-        ax.text(v + total * 0.01, y, f"{v:.2f} ms ({v / total:.0%})", va="center", fontsize=9.5, color=INK)
-        points.append(("amtp_verify_checks", "AMTP", label.split(" —")[0], v))
-    ax.set_yticks(ys)
-    ax.set_yticklabels([label for label, _ in vals], fontsize=9.5, color=INK)
-    ax.set_xlim(0, max(v for _, v in vals) * 1.35)
-    ax.set_xlabel("Time per query (ms)", color=INK2, fontsize=11.5)
-    save(fig, ax, out, "amtp_verify_checks",
-         "Most of AMTP's verification authenticates where every posting lives",
-         f"same queries as the breakdown figure · total verification {total:.2f} ms · ctx and anchor "
-         "checks take under 0.01 ms and are not shown")
 
 
 # ---------------------------------------------------------------- line figures (one story each)
@@ -322,12 +190,7 @@ def e2e_vs_rq(run, out, points):
     ax.set_yscale("log")
     ax.set_xscale("log")
     (xa, ya), ys = data[NAME["amtp"]], data[NAME["secollab"]][1]
-    cross = None
-    for i in range(len(xa) - 1):                              # log-log interpolation of AMTP = SE-COLLAB
-        d0, d1 = math.log(ya[i] / ys[i]), math.log(ya[i + 1] / ys[i + 1])
-        if d0 < 0 <= d1:
-            t = d0 / (d0 - d1)
-            cross = math.exp(math.log(xa[i]) + t * (math.log(xa[i + 1]) - math.log(xa[i])))
+    cross = crossover(xa, ya, ys, logx=True)
     if cross:
         ax.axvline(cross, color=AXIS, linewidth=1, linestyle=(0, (3, 3)))
         ax.text(cross * 1.06, ax.get_ylim()[0] * 1.3, f"AMTP faster ← {cross:,.0f} files → SE-COLLAB faster",
@@ -346,7 +209,157 @@ def e2e_vs_rq(run, out, points):
          f"old-version file (it returns no files)")
 
 
-EX5_FIXED = "query on one domain of 5,000 files while 1–32 domains are deployed · mixed query shapes"
+def crossover(xa, ya, yb, logx):
+    """x where series a stops being below series b (interpolated on log y, and on log x if logx)"""
+    fx = math.log if logx else (lambda v: v)
+    gx = math.exp if logx else (lambda v: v)
+    for i in range(len(xa) - 1):
+        d0, d1 = math.log(ya[i] / yb[i]), math.log(ya[i + 1] / yb[i + 1])
+        if d0 < 0 <= d1:
+            t = d0 / (d0 - d1)
+            return gx(fx(xa[i]) + t * (fx(xa[i + 1]) - fx(xa[i])))
+    return None
+
+
+ATTACK_SHORT = {"modify": "modified", "hide": "hidden", "inject": "injected", "old_version": "old-version"}
+
+
+def missed(run, s):
+    """the attacks a scheme does not detect in every run, or cannot be tested on (N/A)"""
+    det = collections.defaultdict(lambda: [0, 0])
+    for x in rows(run, s, "tamper_detection"):
+        if x["tamper"] == "none":
+            continue
+        d = det[x["tamper"]]
+        if x["status"] == "ok":
+            d[0] += int(x["detected_runs"] or 0)
+            d[1] += int(x["runs"] or 0)
+    return [ATTACK_SHORT[a] for a in ATTACK_SHORT if det[a][1] == 0 or det[a][0] < det[a][1]]
+
+
+def search_rows(run, s, **fix):
+    return ok_rows(run, s, "search_single",
+                   lambda x: x.get("shape", "AND") == "AND" and all(x[k] == v for k, v in fix.items()))
+
+
+def miss_labels(ax, run, data, keys, fmt):
+    """at each line's end: its value and the attacks it misses, so speed is read next to what it buys"""
+    ends = sorted(((data[NAME[s]][1][-1], s) for s in keys))
+    lo, hi = (math.log(v) for v in ax.get_ylim())
+    prev = None
+    for y, s in ends:                                         # keep labels ≥ 7% of the axis height apart
+        ly = math.log(y)
+        if prev is not None and (ly - prev) / (hi - lo) < 0.07:
+            ly = prev + 0.07 * (hi - lo)
+        prev = ly
+        m = missed(run, s)
+        text = fmt(y) + "  ·  " + ("detects every attack" if not m else "misses " + ", ".join(m))
+        ax.annotate(text, (data[NAME[s]][0][-1], math.exp(ly)), xytext=(8, 0), textcoords="offset points",
+                    va="center", fontsize=8.5, color=INK2)
+
+
+# 11. end-to-end time against the number of files, with what each scheme misses
+def e2e_vs_files(run, out, points):
+    fig, ax = new_fig(7.6, 5.0)
+    keys = ("amtp", "secollab", "du", "chen")
+    data = {NAME[s]: series(search_rows(run, s, kQ="5"), lambda x: int(x["N"]), "end_to_end_ms") for s in keys}
+    for s in keys:
+        xs, ys = data[NAME[s]]
+        color, marker = STYLE[s]
+        ax.plot(xs, ys, color=color, marker=marker, markersize=7, markeredgecolor="white", linewidth=2.2,
+                label=NAME[s])
+        points.extend(("e2e_vs_files", NAME[s], x, y) for x, y in zip(xs, ys))
+    ax.set_yscale("log")
+    ax.legend(frameon=False, fontsize=9.5, loc="upper left")
+    (xa, ya), ys = data[NAME["amtp"]], data[NAME["secollab"]][1]
+    cross = crossover(xa, ya, ys, logx=False)
+    ax.set_xlim(0, xa[-1] * 1.75)
+    ax.set_ylim(0.2, 60)
+    ax.xaxis.set_major_locator(FixedLocator(xa))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v / 1000:,.0f}k"))
+    ax.yaxis.set_major_locator(FixedLocator([0.3, 1, 3, 10, 30]))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.yaxis.set_minor_formatter(FuncFormatter(lambda v, _: ""))
+    if cross:
+        ax.axvline(cross, color=AXIS, linewidth=1, linestyle=(0, (3, 3)))
+        ax.text(cross - 1500, 0.24, f"AMTP faster ← {cross / 1000:,.0f}k files", ha="right", va="bottom",
+                fontsize=8.5, color=INK2)
+        points.append(("e2e_vs_files", "crossover AMTP = SE-COLLAB", cross, None))
+    miss_labels(ax, run, data, keys, lambda y: f"{y:,.1f} ms")
+    labels(ax, "Files in the domain", "End-to-end time per query (ms)")
+    save(fig, ax, out, "e2e_vs_files",
+         f"SE-COLLAB only overtakes AMTP above ~{cross / 1000:,.0f}k files — and it misses hidden and "
+         f"injected results",
+         "AND query with k_Q = 5 keywords · one domain · 80 queries per point · right-hand labels: the "
+         "attacks a scheme does not detect (attack_detection.png)")
+
+
+# 12. server time against the number of files
+def server_vs_files(run, out, points):
+    fig, ax = new_fig(7.6, 5.0)
+    keys = ("amtp", "secollab", "du", "chen")
+    data = {NAME[s]: series(search_rows(run, s, kQ="5"), lambda x: int(x["N"]), "server_total_ms") for s in keys}
+    for s in keys:
+        xs, ys = data[NAME[s]]
+        color, marker = STYLE[s]
+        ax.plot(xs, ys, color=color, marker=marker, markersize=7, markeredgecolor="white", linewidth=2.2,
+                label=NAME[s])
+        points.extend(("server_vs_files", NAME[s], x, y) for x, y in zip(xs, ys))
+    ax.set_yscale("log")
+    ax.legend(frameon=False, fontsize=9.5, loc="upper left")
+    xa = data[NAME["amtp"]][0]
+    ax.set_xlim(0, xa[-1] * 1.75)
+    ax.set_ylim(0.012, 40)
+    ax.xaxis.set_major_locator(FixedLocator(xa))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v / 1000:,.0f}k"))
+    ax.yaxis.set_major_locator(FixedLocator([0.01, 0.03, 0.1, 0.3, 1, 3, 10]))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.yaxis.set_minor_formatter(FuncFormatter(lambda v, _: ""))
+    miss_labels(ax, run, data, keys, lambda y: f"{y:,.2f} ms" if y < 1 else f"{y:,.1f} ms")
+    labels(ax, "Files in the domain", "Server time per query (ms)")
+    a, se = data[NAME["amtp"]][1], data[NAME["secollab"]][1]
+    lo, hi = min(s / x for s, x in zip(se, a)), max(s / x for s, x in zip(se, a))
+    save(fig, ax, out, "server_vs_files",
+         f"AMTP's server answers {lo:.1f}–{hi:.0f}× faster than SE-COLLAB's at every size",
+         "AND query with k_Q = 5 keywords · one domain · server = search + proof generation · Chen [40] "
+         "and Du [7] do less server work but miss attacks (right-hand labels)")
+
+
+# 13. end-to-end time against the number of query keywords
+def e2e_vs_kq(run, out, points):
+    fig, ax = new_fig(7.6, 5.0)
+    keys = ("amtp", "secollab", "du", "chen")
+    data = {NAME[s]: series(search_rows(run, s, N="100000"), lambda x: int(x["kQ"]), "end_to_end_ms")
+            for s in keys}
+    for s in keys:
+        xs, ys = data[NAME[s]]
+        color, marker = STYLE[s]
+        ax.plot(xs, ys, color=color, marker=marker, markersize=7, markeredgecolor="white", linewidth=2.2,
+                label=NAME[s])
+        points.extend(("e2e_vs_kq", NAME[s], x, y) for x, y in zip(xs, ys))
+    ax.set_yscale("log")
+    ax.legend(frameon=False, fontsize=9.5, loc="upper left")
+    (xa, ya), ys = data[NAME["amtp"]], data[NAME["secollab"]][1]
+    cross = crossover(xa, ya, ys, logx=False)
+    ax.set_xlim(0, xa[-1] * 1.75)
+    ax.set_ylim(0.2, 150)
+    ax.xaxis.set_major_locator(FixedLocator(xa))
+    ax.yaxis.set_major_locator(FixedLocator([0.3, 1, 3, 10, 30, 100]))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.yaxis.set_minor_formatter(FuncFormatter(lambda v, _: ""))
+    if cross:
+        ax.axvline(cross, color=AXIS, linewidth=1, linestyle=(0, (3, 3)))
+        points.append(("e2e_vs_kq", "crossover AMTP = SE-COLLAB", cross, None))
+    miss_labels(ax, run, data, keys, lambda y: f"{y:,.1f} ms")
+    labels(ax, "Keywords in the query $k_Q$", "End-to-end time per query (ms)")
+    save(fig, ax, out, "e2e_vs_kq",
+         f"With {xa[0]} keywords AMTP is {ys[0] / ya[0]:.1f}× faster than SE-COLLAB; with more, "
+         f"SE-COLLAB is faster but misses hidden and injected results",
+         f"dashed line: AMTP = SE-COLLAB at k_Q ≈ {cross:.1f} · AND query · one domain of 100,000 files · 80 queries per point · right-hand labels: the attacks a "
+         "scheme does not detect (attack_detection.png)")
+
+
+EX5_FIXED ="query on one domain of 5,000 files while 1–32 domains are deployed · mixed query shapes"
 
 
 # 7. query cost against the number of domains
@@ -461,6 +474,61 @@ def update_vs_batch(run, out, points, window=50):
          f"100,000 files · Zipf s = 0.95 · b = 100 · θ_max = 64 · γ with v · each point = median of {window} "
          f"batches · ratio = medians over all {len(rs) // len(SM_VARIANTS):,} batches")
 
+# ---------------------------------------------------------------- attack detection as lines
+def detection_vs_tampered(run, out, points):
+    """per scheme and number of tampered files t: how many of the 4 attack types are detected in every run"""
+    res = {}
+    for s in SCHEMES:
+        agg = collections.defaultdict(lambda: [0, 0])
+        for x in rows(run, s, "tamper_detection"):
+            if x["tamper"] != "none" and x["status"] == "ok":
+                a = agg[(int(x["tampered"]), x["tamper"])]
+                a[0] += int(x["detected_runs"] or 0)
+                a[1] += int(x["runs"] or 0)
+        ts = sorted({t for t, _ in agg})
+        res[s] = (ts, [sum(1 for k in ATTACK_SHORT if agg[(t, k)][1] and agg[(t, k)][0] == agg[(t, k)][1])
+                       for t in ts])
+    fig, ax = new_fig(7.6, 5.0)
+    seen = collections.Counter()
+    for s in SCHEMES:                                         # equal lines are drawn 0.08 apart, and said so
+        ts, ys = res[s]
+        tie = seen[ys[0]]
+        off = 0.12 * tie
+        seen[ys[0]] += 1
+        color, marker = STYLE[s]
+        ax.plot(ts, [y - off for y in ys], color=color, marker=marker, markersize=7, markeredgecolor="white",
+                linewidth=2.2, label=NAME[s])
+        m = missed(run, s)
+        na = [ATTACK_SHORT[k] for k in ATTACK_SHORT
+              if not any(x["tamper"] == k and x["status"] == "ok" for x in rows(run, s, "tamper_detection"))]
+        text = f"{ys[-1]} of 4"
+        if na:
+            text = f"{ys[-1]} of {4 - len(na)} applicable  ·  returns no files"
+        elif m:
+            text += "  ·  misses " + ", ".join(m)
+        else:
+            text += "  ·  every attack"
+        dy = 0 if not tie and seen[ys[0]] == 1 and not any(res[o][1][0] == ys[0] for o in SCHEMES if o != s) \
+            else (6 if not tie else -8)
+        ax.annotate(text, (ts[-1], ys[-1] - off), xytext=(8, dy), textcoords="offset points", va="center",
+                    fontsize=8.5, color=INK2)
+        points.extend(("detection_vs_tampered", NAME[s], t, y) for t, y in zip(ts, ys))
+    ts = res["amtp"][0]
+    ax.set_xscale("log")
+    ax.xaxis.set_major_locator(FixedLocator(ts))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
+    ax.xaxis.set_minor_formatter(FuncFormatter(lambda v, _: ""))
+    ax.set_xlim(ts[0] * 0.75, ts[-1] * 14)
+    ax.set_ylim(-0.3, 4.9)
+    ax.set_yticks(range(5))
+    ax.legend(frameon=False, fontsize=9.5, loc="upper left", ncol=4)
+    labels(ax, "Tampered files t (of 2,021 returned)", "Attack types detected in every run (of 4)")
+    save(fig, ax, out, "detection_vs_tampered",
+         "Only AMTP detects all 4 attack types, whether 5 or 1,000 files are tampered",
+         "modified file, hidden result, injected result, old file version · keyword with 2,021 results in "
+         "100,000 files · D1–D4 · 15 runs per domain and t · no false alarm by any scheme · equal lines drawn "
+         "slightly apart")
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -468,13 +536,12 @@ def main():
     ap.add_argument("--out", default=os.path.join(HERE, "results", "new_amtp_result", "graph_op"))
     a = ap.parse_args()
     points = []
-    attack_detection(a.run, a.out, points)
-    proof_size(a.run, a.out, points)
-    e2e_breakdown(a.run, a.out, points)
-    amtp_checks(a.run, a.out, points)
-    for fn in (proof_size_multi, e2e_vs_rq, query_vs_domains, update_vs_domains, max_partition,
-               update_vs_batch):
-        fn(a.run, a.out, points)
+    main_dir, limits_dir = os.path.join(a.out, "main"), os.path.join(a.out, "limits")
+    for fn in (detection_vs_tampered, proof_size, proof_size_multi, query_vs_domains, update_vs_domains,
+               max_partition, update_vs_batch):
+        fn(a.run, main_dir, points)
+    for fn in (e2e_vs_rq, e2e_vs_files, server_vs_files, e2e_vs_kq):
+        fn(a.run, limits_dir, points)
     with open(os.path.join(a.out, "figure_points.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["figure", "series", "x", "value"])
