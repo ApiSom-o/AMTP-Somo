@@ -1,5 +1,5 @@
 {
- "input": "in7",
+ "input": "in8",
  "result": "amtp_verify_single.csv",
  "command": "/home/ubuntu/NewAMTP/amtp_code/bench/experiments.py verify1 --reps 15 --warmup 3 --out /home/ubuntu/NewAMTP/baselines/results/runs/paper_nov_q/amtp",
  "written": "2026-11-14 15:14:54 +0000",

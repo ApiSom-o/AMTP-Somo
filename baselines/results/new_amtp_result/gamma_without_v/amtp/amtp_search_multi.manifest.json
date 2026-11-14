@@ -1,5 +1,5 @@
 {
- "input": "in6",
+ "input": "in7",
  "result": "amtp_search_multi.csv",
  "command": "/home/ubuntu/NewAMTP/amtp_code/bench/experiments.py xsearch --reps 15 --warmup 3 --out /home/ubuntu/NewAMTP/baselines/results/runs/paper_nov_q/amtp",
  "written": "2026-11-14 15:28:08 +0000",
