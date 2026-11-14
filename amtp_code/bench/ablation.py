@@ -49,6 +49,7 @@ from bench.workload import (arxiv_docs, arxiv_loader, enron_docs, hot_delete_str
                             make_queries, synthetic_docs, update_stream)
 
 DOMAIN = "A"
+VARIANTS = ("AMTP", "Static-MT", "Global-MT", "Global-MT(v)")
 
 
 def build(variant, docs, a):
@@ -126,6 +127,10 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--global-versioned", action="store_true",
                     help="also run Global-MT(v): one partition with version bumps")
+    ap.add_argument("--variants", default=None,
+                    help="comma list of the variants to run, e.g. \"Global-MT(v),Global-MT\" (default: AMTP, "
+                         "Static-MT, Global-MT, + Global-MT(v) with --global-versioned). The documents, update stream "
+                         "and queries come from the seed only, so a variant run alone sees the same workload")
     ap.add_argument("--out", default="results")
     ap.add_argument("--gamma-no-v", action="store_true",
                     help="γ = H(PID ‖ H(Enc(L))) without the partition version v (study B4; same as AMTP_GAMMA_V=0)")
@@ -135,6 +140,11 @@ def main():
         set_gamma_v(False)
 
     variants = ["AMTP", "Static-MT", "Global-MT"] + (["Global-MT(v)"] if a.global_versioned else [])
+    if a.variants:
+        variants = [v.strip() for v in a.variants.split(",") if v.strip()]
+        unknown = [v for v in variants if v not in VARIANTS]
+        if unknown or not variants:
+            ap.error(f"--variants: unknown {unknown}; choose from {', '.join(VARIANTS)}")
     skews = [float(s) for s in a.skews.split(",")]
     os.makedirs(a.out, exist_ok=True)
     manifest = {"args": vars(a), "b": a.batch_size, "gamma_v": os.environ.get("AMTP_GAMMA_V", "1") != "0",
