@@ -1,5 +1,5 @@
 {
- "input": "w6",
+ "input": "in4",
  "result": "amtp_exp5_domains.csv",
  "command": "/home/ubuntu/NewAMTP/amtp_code/bench/experiments.py exp5 --reps 15 --warmup 3 --out /home/ubuntu/NewAMTP/baselines/results/runs/paper_nov/amtp",
  "written": "2026-11-14 08:10:44 +0000",

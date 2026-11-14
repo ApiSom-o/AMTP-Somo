@@ -1,5 +1,5 @@
 {
- "input": "w5",
+ "input": "in3",
  "result": "amtp_exp3_dynamic_update.csv",
  "command": "/home/ubuntu/NewAMTP/amtp_code/bench/experiments.py exp3 --reps 15 --warmup 3 --sizes 100000 --batches 1 10 100 1000 --out /home/ubuntu/NewAMTP/baselines/results/runs/paper_nov/amtp",
  "written": "2026-11-14 01:31:28 +0000",
