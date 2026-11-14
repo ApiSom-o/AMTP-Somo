@@ -229,5 +229,8 @@ arxiv-metadata-oai-snapshot.json
 amtp_file_db*.zip
 
 
-# experiment runs (never commit results)
-baselines/results/runs/
+# experiment runs: committed (cloud copies and merged sets); local watcher state and the Mac smoke run are not
+baselines/results/runs/**/.seen_*
+baselines/results/runs/**/.pulled_*
+baselines/results/runs/smoke_*/
+!baselines/results/runs/**/*.log
