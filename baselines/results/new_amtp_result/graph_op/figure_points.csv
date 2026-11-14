@@ -1,0 +1,200 @@
+figure,series,x,value
+attack_detection,AMTP,none,✓ 0 / 60
+attack_detection,AMTP,modify,✓ 100% check: ct
+attack_detection,AMTP,hide,✓ 100% check: comp
+attack_detection,AMTP,inject,✓ 100% check: comp
+attack_detection,AMTP,old_version,✓ 100% check: ct
+attack_detection,Chen [40],none,✓ 0 / 60
+attack_detection,Chen [40],modify,N/A
+attack_detection,Chen [40],hide,✓ 100%
+attack_detection,Chen [40],inject,✓ 100%
+attack_detection,Chen [40],old_version,N/A
+attack_detection,Du [7],none,✓ 0 / 60
+attack_detection,Du [7],modify,✓ 100%
+attack_detection,Du [7],hide,✓ 100%
+attack_detection,Du [7],inject,✗ 0%
+attack_detection,Du [7],old_version,✓ 100%
+attack_detection,SE-COLLAB [37],none,✓ 0 / 60
+attack_detection,SE-COLLAB [37],modify,✓ 100%
+attack_detection,SE-COLLAB [37],hide,✗ 0%
+attack_detection,SE-COLLAB [37],inject,✗ 0%
+attack_detection,SE-COLLAB [37],old_version,✓ 100%
+proof_size_vs_rq,AMTP,10.0,6.168
+proof_size_vs_rq,AMTP,100.0,42.4
+proof_size_vs_rq,AMTP,990.0,291.764
+proof_size_vs_rq,AMTP,2550.5,572.532
+proof_size_vs_rq,SE-COLLAB [37],10.0,5.61
+proof_size_vs_rq,SE-COLLAB [37],100.0,56.1
+proof_size_vs_rq,SE-COLLAB [37],990.0,555.39
+proof_size_vs_rq,SE-COLLAB [37],2550.5,1430.8305
+proof_size_vs_rq,Du [7],10.0,34.84
+proof_size_vs_rq,Du [7],100.0,346.93
+proof_size_vs_rq,Du [7],990.0,3370.72
+proof_size_vs_rq,Du [7],2550.5,8711.17
+e2e_breakdown,Du [7],Query generation (DU),0.06044300016583293
+e2e_breakdown,Du [7],Search + proof (server),0.36069849966224865
+e2e_breakdown,Du [7],Verification (DU),0.09345750004285946
+e2e_breakdown,Du [7],Decrypt / decode (DU),0.14070800034460262
+e2e_breakdown,Du [7],end_to_end,0.5193455008338788
+e2e_breakdown,Chen [40],Query generation (DU),0.019048499780183192
+e2e_breakdown,Chen [40],Search + proof (server),0.03389450012036832
+e2e_breakdown,Chen [40],Verification (DU),1.7987240007641958
+e2e_breakdown,Chen [40],Decrypt / decode (DU),0.24375500015594298
+e2e_breakdown,Chen [40],end_to_end,2.1075325003039325
+e2e_breakdown,SE-COLLAB [37],Query generation (DU),3.3905570003298635
+e2e_breakdown,SE-COLLAB [37],Search + proof (server),4.775565500040102
+e2e_breakdown,SE-COLLAB [37],Verification (DU),0.9278029997403792
+e2e_breakdown,SE-COLLAB [37],end_to_end,9.103773999868281
+e2e_breakdown,AMTP,Query generation (DU),0.152805499965325
+e2e_breakdown,AMTP,Search + proof (server),2.0675810001193895
+e2e_breakdown,AMTP,Verification (DU),8.515173500200035
+e2e_breakdown,AMTP,Decrypt / decode (DU),0.037220500416879077
+e2e_breakdown,AMTP,end_to_end,10.726860499744362
+amtp_verify_checks,AMTP,part,6.47427100011555
+amtp_verify_checks,AMTP,papc,1.741654999932507
+amtp_verify_checks,AMTP,idx,0.2705805009100004
+amtp_verify_checks,AMTP,ct,0.02637550096551422
+amtp_verify_checks,AMTP,comp,0.018807000742526725
+proof_size_vs_rq_4domains,AMTP,10.0,9.072
+proof_size_vs_rq_4domains,AMTP,100.0,49.824
+proof_size_vs_rq_4domains,AMTP,1002.0,341.824
+proof_size_vs_rq_4domains,AMTP,9448.0,2183.544
+proof_size_vs_rq_4domains,SE-COLLAB [37],10.0,5.61
+proof_size_vs_rq_4domains,SE-COLLAB [37],100.0,56.1
+proof_size_vs_rq_4domains,SE-COLLAB [37],1002.0,562.122
+proof_size_vs_rq_4domains,SE-COLLAB [37],9448.0,5300.328
+e2e_vs_rq,AMTP,10.0,0.8044524997785629
+e2e_vs_rq,AMTP,100.0,5.47076150041903
+e2e_vs_rq,AMTP,990.0,44.51625850015262
+e2e_vs_rq,AMTP,2550.5,100.09899849956128
+e2e_vs_rq,SE-COLLAB [37],10.0,9.115199999541801
+e2e_vs_rq,SE-COLLAB [37],100.0,10.513795500628476
+e2e_vs_rq,SE-COLLAB [37],990.0,23.802075500498177
+e2e_vs_rq,SE-COLLAB [37],2550.5,46.828135498799384
+e2e_vs_rq,Du [7],10.0,1.520855998933257
+e2e_vs_rq,Du [7],100.0,13.61332900069101
+e2e_vs_rq,Du [7],990.0,117.21882000165351
+e2e_vs_rq,Du [7],2550.5,280.9999234987117
+e2e_vs_rq,Chen [40],10.0,0.5773979992227396
+e2e_vs_rq,Chen [40],100.0,0.9187895002469304
+e2e_vs_rq,Chen [40],990.0,3.824907499620167
+e2e_vs_rq,Chen [40],2550.5,8.803492500192078
+e2e_vs_rq,crossover AMTP = SE-COLLAB,322.4016039545215,
+query_vs_domains,AMTP,1,3.9857629999460187
+query_vs_domains,AMTP,2,4.049411000778491
+query_vs_domains,AMTP,4,4.048486000101548
+query_vs_domains,AMTP,8,4.05942299948947
+query_vs_domains,AMTP,16,4.090239000106521
+query_vs_domains,AMTP,32,4.079861000718665
+query_vs_domains,SE-COLLAB [37],1,8.924075000322773
+query_vs_domains,SE-COLLAB [37],2,8.928578999984893
+query_vs_domains,SE-COLLAB [37],4,8.91243400019448
+query_vs_domains,SE-COLLAB [37],8,8.909886000765255
+query_vs_domains,SE-COLLAB [37],16,8.914999999433348
+query_vs_domains,SE-COLLAB [37],32,8.902687999579939
+update_vs_domains,AMTP,1,105.67284499938978
+update_vs_domains,AMTP,2,105.70885200013436
+update_vs_domains,AMTP,4,107.51133899975684
+update_vs_domains,AMTP,8,112.21054899942828
+update_vs_domains,AMTP,16,108.62233799980459
+update_vs_domains,AMTP,32,111.17760199977056
+max_partition_vs_batch,AMTP,99,64.0
+max_partition_vs_batch,AMTP,199,64.0
+max_partition_vs_batch,AMTP,299,64.0
+max_partition_vs_batch,AMTP,399,64.0
+max_partition_vs_batch,AMTP,499,64.0
+max_partition_vs_batch,AMTP,599,64.0
+max_partition_vs_batch,AMTP,699,64.0
+max_partition_vs_batch,AMTP,799,64.0
+max_partition_vs_batch,AMTP,899,64.0
+max_partition_vs_batch,AMTP,999,64.0
+max_partition_vs_batch,AMTP,1099,64.0
+max_partition_vs_batch,AMTP,1199,64.0
+max_partition_vs_batch,AMTP,1299,64.0
+max_partition_vs_batch,AMTP,1399,64.0
+max_partition_vs_batch,AMTP,1499,64.0
+max_partition_vs_batch,AMTP,1599,64.0
+max_partition_vs_batch,AMTP,1673,64.0
+max_partition_vs_batch,Static-MT,99,108.0
+max_partition_vs_batch,Static-MT,199,166.0
+max_partition_vs_batch,Static-MT,299,224.0
+max_partition_vs_batch,Static-MT,399,282.0
+max_partition_vs_batch,Static-MT,499,339.0
+max_partition_vs_batch,Static-MT,599,397.0
+max_partition_vs_batch,Static-MT,699,455.0
+max_partition_vs_batch,Static-MT,799,513.0
+max_partition_vs_batch,Static-MT,899,571.0
+max_partition_vs_batch,Static-MT,999,629.0
+max_partition_vs_batch,Static-MT,1099,589.0
+max_partition_vs_batch,Static-MT,1199,533.0
+max_partition_vs_batch,Static-MT,1299,477.0
+max_partition_vs_batch,Static-MT,1399,416.0
+max_partition_vs_batch,Static-MT,1499,355.0
+max_partition_vs_batch,Static-MT,1599,302.0
+max_partition_vs_batch,Static-MT,1673,259.0
+update_vs_batch,AMTP,49,3.7467198
+update_vs_batch,AMTP,99,3.4312987
+update_vs_batch,AMTP,149,4.4234275
+update_vs_batch,AMTP,199,4.2505701
+update_vs_batch,AMTP,249,4.4789961
+update_vs_batch,AMTP,299,2.76825615
+update_vs_batch,AMTP,349,4.0211279
+update_vs_batch,AMTP,399,4.91473575
+update_vs_batch,AMTP,449,4.1732768
+update_vs_batch,AMTP,499,4.1654539999999995
+update_vs_batch,AMTP,549,4.7501976500000005
+update_vs_batch,AMTP,599,5.2450977
+update_vs_batch,AMTP,649,5.05961765
+update_vs_batch,AMTP,699,4.59297065
+update_vs_batch,AMTP,749,4.7371886000000005
+update_vs_batch,AMTP,799,5.57739215
+update_vs_batch,AMTP,849,5.230952050000001
+update_vs_batch,AMTP,899,5.105174099999999
+update_vs_batch,AMTP,949,5.5007760999999995
+update_vs_batch,AMTP,999,4.68196615
+update_vs_batch,AMTP,1049,7.16136195
+update_vs_batch,AMTP,1099,6.86401265
+update_vs_batch,AMTP,1149,6.6019194500000005
+update_vs_batch,AMTP,1199,6.435283
+update_vs_batch,AMTP,1249,6.1958756
+update_vs_batch,AMTP,1299,5.9316644499999995
+update_vs_batch,AMTP,1349,5.6661784
+update_vs_batch,AMTP,1399,5.3832735
+update_vs_batch,AMTP,1449,5.09186575
+update_vs_batch,AMTP,1499,4.7949848500000005
+update_vs_batch,AMTP,1549,4.54340255
+update_vs_batch,AMTP,1599,4.2071121
+update_vs_batch,AMTP,1649,3.9768869999999996
+update_vs_batch,Static-MT,49,5.3709438
+update_vs_batch,Static-MT,99,7.38454175
+update_vs_batch,Static-MT,149,9.309889599999998
+update_vs_batch,Static-MT,199,11.1517351
+update_vs_batch,Static-MT,249,13.04955025
+update_vs_batch,Static-MT,299,14.88825195
+update_vs_batch,Static-MT,349,16.817202899999998
+update_vs_batch,Static-MT,399,18.830311000000002
+update_vs_batch,Static-MT,449,20.63918805
+update_vs_batch,Static-MT,499,22.416575299999998
+update_vs_batch,Static-MT,549,24.2559355
+update_vs_batch,Static-MT,599,26.1158803
+update_vs_batch,Static-MT,649,28.0358983
+update_vs_batch,Static-MT,699,29.762237849999998
+update_vs_batch,Static-MT,749,31.591360549999997
+update_vs_batch,Static-MT,799,33.0121891
+update_vs_batch,Static-MT,849,35.024348200000006
+update_vs_batch,Static-MT,899,36.8659267
+update_vs_batch,Static-MT,949,38.74227055
+update_vs_batch,Static-MT,999,40.89890015
+update_vs_batch,Static-MT,1049,34.0084096
+update_vs_batch,Static-MT,1099,32.760711900000004
+update_vs_batch,Static-MT,1149,31.308774650000004
+update_vs_batch,Static-MT,1199,29.6284365
+update_vs_batch,Static-MT,1249,28.31523785
+update_vs_batch,Static-MT,1299,26.5252977
+update_vs_batch,Static-MT,1349,25.52617275
+update_vs_batch,Static-MT,1399,23.73642345
+update_vs_batch,Static-MT,1449,22.29109985
+update_vs_batch,Static-MT,1499,20.6870166
+update_vs_batch,Static-MT,1549,19.2911189
+update_vs_batch,Static-MT,1599,17.863403599999998
+update_vs_batch,Static-MT,1649,15.897649000000001
