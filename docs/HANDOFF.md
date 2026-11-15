@@ -61,6 +61,7 @@
 | การวางไฟล์ (15 พ.ย.) | **fill**: partition ของกลุ่มที่มีไฟล์มากที่สุดแต่ยังไม่ถึง θ_max ถ้าเต็มหมดวางต่อแล้วให้ split แก้ · Static-MT ใช้กติกาเดียวกัน · ex3 ฟรีซ partition เหมือน paper · merge ตาม paper สมการ 34 · รันด้วย `AMTP_PLACEMENT=fill` (`docs/reports/2026-11-15-fill-placement.md`) |
 | engine (15 พ.ย.) | commit อัปเดต Merkle tree แบบรวมครั้งเดียว (`MerkleTree.set_leaves`) และค้น Search Tree ครั้งเดียวต่อ keyword: ผลเหมือนเดิมทุก bit แต่ hash ฝั่ง server ลด 41–71% ทุก variant · **ผล update บน cloud ทุกชุดก่อนหน้านี้ (รวม Global-MT(v) ของ w3) เทียบกับรอบใหม่ไม่ได้** (`docs/reports/2026-11-15-engine-batched-merkle.md`) |
 | แผน cloud รอบใหม่ (15 พ.ย.) | `PLAN=fill RUN_NAME=paper_fill bash scripts/cloud_worker.sh <1..5>` (ผลอยู่ใน `runs/paper_fill_v/`) · 5 เครื่อง `AMTP_PLACEMENT=fill`: ex4 AMTP + Static-MT ที่ θ = 64 / 128 / 256 เครื่องละ θ · AMTP ที่เหลือ (search1, verify1, tamper, multi-domain, ex3, ex5) 1 เครื่อง · AMTP θ = 64 + Global-MT(v) 1 เครื่อง · baseline และ Global-MT แบบไม่มี v ไม่รันใหม่ |
+| สถานะรอบ fill (15 พ.ย. 23:44) | เริ่ม 20:59 ที่ `869cf73` · search1 / verify1 / tamper / xsearch / xverify เสร็จแล้ว (`new_amtp_result/fill_v/`, กราฟ `graph_fill/`) · ที่เหลือคาดว่าครบวันจันทร์ ~11:30–13:30 (`docs/reports/2026-11-15-cloud-fill-partial.md`) |
 | ข้ามไปก่อน (15 พ.ย.) | จัดไฟล์ตาม keyword (กลัวผิด design) · cache (ยังไม่ตัดสินใจ ถ้าทำต้องทำให้ baseline ด้วย) · AND pruning (future work) · check part เฉพาะไฟล์ผลลัพธ์ (รอถามอาจารย์) |
 
 ---
