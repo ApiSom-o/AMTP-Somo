@@ -62,6 +62,22 @@ def gamma_has_v() -> bool:
     return _GAMMA_V
 
 
+# AND pruning (study, default off): the server answers an AND with the full posting list of one keyword
+# and, for every other keyword, only its components in the partitions that list covers (amtp/server.py).
+# AMTP_AND_PRUNE=1 in the environment, or set_and_prune(True) before the snapshots are built. The user
+# accepts both answer forms whatever this setting is (amtp/user.py).
+_AND_PRUNE = os.environ.get("AMTP_AND_PRUNE", "0") == "1"
+
+
+def set_and_prune(on: bool) -> None:
+    global _AND_PRUNE
+    _AND_PRUNE = bool(on)
+
+
+def and_prune_on() -> bool:
+    return _AND_PRUNE
+
+
 def gamma_inner(pid: str, v: int, inner: bytes) -> bytes:
     """γ from its inner hash H(Enc(L)): H(PID ‖ v ‖ inner), or H(PID ‖ inner) when γ leaves v out"""
     return H(pid, v, inner) if _GAMMA_V else H(pid, inner)
@@ -141,9 +157,17 @@ class DomainState:
 
         # PAPC per keyword, then the indexed IMT: leaf H(h ‖ ρ ‖ next(h)) at its position
         self.rho = {}
+        self._post_trees = {}                   # h -> R^post tree; kept only with AND pruning
+        keep = and_prune_on()
         for h, L in self.postings.items():
             gammas = [gamma(pid, self.by_pid[pid].v, comp) for pid, comp in L]
-            self.rho[h] = rho(h, len(L), merkle_root(gammas))
+            if keep:
+                tree = MerkleTree(gammas)
+                self._post_trees[h] = tree
+                r_post = tree.root
+            else:
+                r_post = merkle_root(gammas)
+            self.rho[h] = rho(h, len(L), r_post)
         layout = self.imt_layout or sorted_imt_layout(self.rho)
         if set(layout) - {None, SENTINEL_LO} != set(self.rho) or layout[0] != SENTINEL_LO:
             raise ValueError("IMT layout does not hold exactly the indexed keys")
@@ -157,6 +181,15 @@ class DomainState:
         self.R_part = self.part_tree.root
         self.R_idx = self.imt.root
         self.R_D = domain_root(self.domain, self.epoch, self.R_part, self.R_idx)
+
+    def post_tree(self, h: bytes) -> MerkleTree:
+        """The R^post tree of keyword h (γ in PID order). Kept from the build when AND pruning is on,
+        otherwise built here once (and kept) from the snapshot's own postings."""
+        tree = self._post_trees.get(h)
+        if tree is None:
+            tree = MerkleTree([gamma(pid, self.by_pid[pid].v, comp) for pid, comp in self.postings[h]])
+            self._post_trees[h] = tree
+        return tree
 
 
 def domain_root(domain: str, epoch: int, r_part: bytes, r_idx: bytes) -> bytes:

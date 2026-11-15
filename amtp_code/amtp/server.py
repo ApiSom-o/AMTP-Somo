@@ -3,6 +3,7 @@
 There is no attack code here. The demo and the tests load the adversary plug-in
 (amtp/adversary.py), which wraps this server; the benchmarks never do.
 """
+import bisect
 import time
 
 from .core import boolean
@@ -10,8 +11,8 @@ from .core.crypto import hmac_ok, sig_ok
 from .dht import DHT, StorageError
 from .engine import Engine
 from .update import delta, enc_aff, request_digest
-from .core.hashing import H, TAG_QUERY, enc_bq
-from .index import SENTINEL_LO
+from .core.hashing import H, TAG_QUERY, enc_bq, enc_posting
+from .index import SENTINEL_LO, and_prune_on
 
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
     """H(tag ‖ i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η): the message under τ_Q, all fields binary."""
@@ -224,15 +225,22 @@ def build_response(state, b_q, nonce, dht, timing=None):
     lookup (Search Tree + IMT evidence), eval (Boolean evaluation), proof (ASPA), fetch (DHT)."""
     t0 = time.perf_counter()
     evidence, leaf_sets = [], {}
-    for h in sorted(boolean.leaves(b_q)):
+    postings = {h: lookup(state, bytes.fromhex(h)) for h in sorted(boolean.leaves(b_q))}
+    pruned, focus_set = (_and_plan(b_q, postings) if and_prune_on() else (set(), None))
+    for h, posting in postings.items():
         hb = bytes.fromhex(h)
-        posting = lookup(state, hb)
         if posting is not None:
-            comps = _components(state, hb, posting)
             pos = state.imt_pos[hb]
-            evidence.append({"h": h, "status": "present", "L": comps, "pos": pos,
-                             "next": state.imt_next[hb].hex(), "n": state.imt_n,
-                             "proof": [x.hex() for x in state.imt.multiproof([pos])]})
+            imt_part = {"pos": pos, "next": state.imt_next[hb].hex(), "n": state.imt_n,
+                        "proof": [x.hex() for x in state.imt.multiproof([pos])]}
+            ent = _focus_evidence(state, hb, posting, focus_set) if h in pruned else None
+            if ent is not None and _focus_bytes(ent[0]) < _full_bytes(posting):
+                ent, comps = ent
+                evidence.append({"h": h, "status": "present", **ent, **imt_part})
+            else:            # full list (also when the focus form would not be smaller: still sound,
+                             # a keyword sent in full only narrows the focus set the user computes)
+                comps = _components(state, hb, posting)
+                evidence.append({"h": h, "status": "present", "L": comps, **imt_part})
             leaf_sets[h] = {(cid, pid, slot) for pid, comp in comps for cid, slot in comp}
         else:
             evidence.append(_absent_evidence(state, hb))
@@ -288,6 +296,76 @@ def lookup(state, hb: bytes):
     if not state.cuckoo.might_contain(hb):
         return None
     return state.postings.get(hb)
+
+
+def _and_plan(b_q, postings):
+    """AND pruning: which present keywords may be sent as focus evidence, and the focus set F.
+    Every keyword in a chosen 'full' set is sent in full; for an AND node the child with the fewest
+    partitions is chosen, an OR node needs all its children. F = boolean.focus over the full keywords
+    (the rule the user applies). Returns (pruned keys, F); nothing is pruned if every key must be full."""
+    sel = {h: ({pid for pid, _ in p} if p is not None else set()) for h, p in postings.items()}
+    size = {h: (sum(len(c) for _, c in p) if p is not None else 0) for h, p in postings.items()}
+
+    def plan(node):
+        if node[0] == "leaf":
+            return sel[node[1]], {node[1]}
+        subs = [plan(c) for c in node[1]]
+        if node[0] == "AND":
+            return min(subs, key=lambda s: (len(s[0]), sum(size[h] for h in s[1])))
+        return set().union(*(s[0] for s in subs)), set().union(*(s[1] for s in subs))
+
+    _, full = plan(b_q)
+    full |= {h for h, p in postings.items() if p is None}          # absent keys: proven empty
+    pruned = {h for h in postings if h not in full}
+    if not pruned:
+        return set(), None
+    return pruned, boolean.focus(b_q, {h: sel[h] for h in full})
+
+
+def _focus_evidence(state, hb: bytes, posting, focus_set):
+    """Focus evidence of one present keyword for the partitions F: its component in every partition of F it
+    has (segs), and for every partition of F it lacks the two adjacent γ leaves around that PID (nb, as
+    preimages PID, v, H(Enc(L))), opened together in its R^post tree. ρ = H(h ‖ |Sel| ‖ R^post) as usual."""
+    pids = [pid for pid, _ in posting]
+    at = {pid: j for j, pid in enumerate(pids)}
+    seg_pos, nb_pos = set(), set()
+    for t in focus_set:
+        if t in at:
+            seg_pos.add(at[t])
+        else:
+            k = bisect.bisect_left(pids, t)                 # pids[k-1] < t < pids[k]
+            if k > 0:
+                nb_pos.add(k - 1)
+            if k < len(pids):
+                nb_pos.add(k)
+    nb_pos -= seg_pos
+    segs, comps = [], []
+    for j in sorted(seg_pos):
+        pid, comp = posting[j]
+        wire = [(cid.hex(), slot) for cid, slot in comp]
+        segs.append([j, pid, wire])
+        comps.append((pid, wire))
+    nb = [[j, posting[j][0], state.by_pid[posting[j][0]].v, H(enc_posting(posting[j][1])).hex()]
+          for j in sorted(nb_pos)]
+    tree = state.post_tree(hb)
+    opened = sorted(seg_pos | nb_pos)
+    ent = {"mode": "focus", "n_sel": len(pids), "R_post": tree.root.hex(), "segs": segs, "nb": nb,
+           "post_proof": [x.hex() for x in tree.multiproof(opened)] if opened else []}
+    return ent, comps
+
+
+_HASH, _INT = 32, 8       # the size rule of baselines/wire_sizes.py (binary: hash 32 B, number 8 B)
+
+
+def _full_bytes(posting) -> int:
+    """Wire size of a full posting list L_h (as wire_sizes.amtp_proof_bytes counts it)."""
+    return _INT + sum(2 * _INT + len(comp) * (_HASH + _INT) for _, comp in posting)
+
+
+def _focus_bytes(ent) -> int:
+    """Wire size of the focus part of an evidence entry (as wire_sizes.amtp_proof_bytes counts it)."""
+    return (_INT + _HASH + _INT + sum(3 * _INT + len(c) * (_HASH + _INT) for _, _, c in ent["segs"])
+            + _INT + len(ent["nb"]) * (3 * _INT + _HASH) + _INT + len(ent["post_proof"]) * _HASH)
 
 
 def _absent_evidence(state, hb: bytes):

@@ -43,7 +43,13 @@ def amtp_proof_bytes(proof: dict) -> int:
     n = 0
     for e in proof["evidence"]:
         n += HASH + INT                                      # h, status
-        if e["status"] == "present":
+        if e["status"] == "present" and e.get("mode") == "focus":       # AND pruning (amtp/server.py)
+            n += INT + HASH                                  # n_sel, R^post
+            n += INT + sum(INT + INT + INT + len(comp) * (HASH + INT) for _, _, comp in e["segs"])
+            n += INT + len(e["nb"]) * (INT + INT + INT + HASH)   # neighbours: position, PID, v, H(Enc(L))
+            n += INT + len(e["post_proof"]) * HASH           # R^post multiproof
+            n += INT + HASH + INT + len(e["proof"]) * HASH   # pos, next, n, IMT path
+        elif e["status"] == "present":
             n += INT + sum(INT + INT + len(comp) * (HASH + INT) for _, comp in e["L"])   # L_h
             n += INT + HASH + INT + len(e["proof"]) * HASH   # pos, next, n, IMT path
         else:
