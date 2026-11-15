@@ -173,16 +173,21 @@ class DomainState:
 
         # PAPC per keyword, then the indexed IMT: leaf H(h ‖ ρ ‖ next(h)) at its position
         self.rho = {}
-        self._post_trees = {}                   # h -> R^post tree; kept only with AND pruning
+        # AND pruning only: per keyword, the R^post tree, the inner hashes H(Enc(L_j)) of its components
+        # (the neighbour preimages of a focus proof) and its number of postings. Index data built with the
+        # snapshot (same work as the γ below), not a cache filled by queries.
+        self._post_trees, self._post_inner, self._post_count = {}, {}, {}
         keep = and_prune_on()
         for h, L in self.postings.items():
-            gammas = [gamma(pid, self.by_pid[pid].v, comp) for pid, comp in L]
             if keep:
+                inners = [H(enc_posting(comp)) for _, comp in L]
+                gammas = [gamma_inner(pid, self.by_pid[pid].v, x) for (pid, _), x in zip(L, inners)]
                 tree = MerkleTree(gammas)
-                self._post_trees[h] = tree
+                self._post_trees[h], self._post_inner[h] = tree, inners
+                self._post_count[h] = sum(len(comp) for _, comp in L)
                 r_post = tree.root
             else:
-                r_post = merkle_root(gammas)
+                r_post = merkle_root([gamma(pid, self.by_pid[pid].v, comp) for pid, comp in L])
             self.rho[h] = rho(h, len(L), r_post)
         layout = self.imt_layout or sorted_imt_layout(self.rho)
         if set(layout) - {None, SENTINEL_LO} != set(self.rho) or layout[0] != SENTINEL_LO:
@@ -201,11 +206,28 @@ class DomainState:
     def post_tree(self, h: bytes) -> MerkleTree:
         """The R^post tree of keyword h (γ in PID order). Kept from the build when AND pruning is on,
         otherwise built here once (and kept) from the snapshot's own postings."""
-        tree = self._post_trees.get(h)
-        if tree is None:
-            tree = MerkleTree([gamma(pid, self.by_pid[pid].v, comp) for pid, comp in self.postings[h]])
-            self._post_trees[h] = tree
-        return tree
+        if h not in self._post_trees:
+            self._keep_post(h)
+        return self._post_trees[h]
+
+    def post_inner(self, h: bytes) -> list:
+        """H(Enc(L_j)) of every component of keyword h, in PID order (see post_tree)."""
+        if h not in self._post_inner:
+            self._keep_post(h)
+        return self._post_inner[h]
+
+    def post_count(self, h: bytes) -> int:
+        """Number of postings (files) of keyword h (see post_tree)."""
+        if h not in self._post_count:
+            self._keep_post(h)
+        return self._post_count[h]
+
+    def _keep_post(self, h: bytes):
+        L = self.postings[h]
+        inners = [H(enc_posting(comp)) for _, comp in L]
+        self._post_inner[h] = inners
+        self._post_trees[h] = MerkleTree([gamma_inner(pid, self.by_pid[pid].v, x) for (pid, _), x in zip(L, inners)])
+        self._post_count[h] = sum(len(comp) for _, comp in L)
 
 
 def domain_root(domain: str, epoch: int, r_part: bytes, r_idx: bytes) -> bytes:

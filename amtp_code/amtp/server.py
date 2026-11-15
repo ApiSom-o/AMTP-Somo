@@ -11,7 +11,7 @@ from .core.crypto import hmac_ok, sig_ok
 from .dht import DHT, StorageError
 from .engine import Engine
 from .update import delta, enc_aff, request_digest
-from .core.hashing import H, TAG_QUERY, enc_bq, enc_posting
+from .core.hashing import H, TAG_QUERY, enc_bq
 from .index import SENTINEL_LO, and_prune_on, part_results_on
 
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
@@ -226,7 +226,7 @@ def build_response(state, b_q, nonce, dht, timing=None):
     t0 = time.perf_counter()
     evidence, leaf_sets = [], {}
     postings = {h: lookup(state, bytes.fromhex(h)) for h in sorted(boolean.leaves(b_q))}
-    pruned, focus_set = (_and_plan(b_q, postings) if and_prune_on() else (set(), None))
+    pruned, focus_set = (_and_plan(state, b_q, postings) if and_prune_on() else (set(), None))
     for h, posting in postings.items():
         hb = bytes.fromhex(h)
         if posting is not None:
@@ -234,7 +234,7 @@ def build_response(state, b_q, nonce, dht, timing=None):
             imt_part = {"pos": pos, "next": state.imt_next[hb].hex(), "n": state.imt_n,
                         "proof": [x.hex() for x in state.imt.multiproof([pos])]}
             ent = _focus_evidence(state, hb, posting, focus_set) if h in pruned else None
-            if ent is not None and _focus_bytes(ent[0]) < _full_bytes(posting):
+            if ent is not None and _focus_bytes(ent[0]) < _full_bytes(len(posting), state.post_count(hb)):
                 ent, comps = ent
                 evidence.append({"h": h, "status": "present", **ent, **imt_part})
             else:            # full list (also when the focus form would not be smaller: still sound,
@@ -310,13 +310,13 @@ def lookup(state, hb: bytes):
     return state.postings.get(hb)
 
 
-def _and_plan(b_q, postings):
+def _and_plan(state, b_q, postings):
     """AND pruning: which present keywords may be sent as focus evidence, and the focus set F.
     Every keyword in a chosen 'full' set is sent in full; for an AND node the child with the fewest
     partitions is chosen, an OR node needs all its children. F = boolean.focus over the full keywords
     (the rule the user applies). Returns (pruned keys, F); nothing is pruned if every key must be full."""
     sel = {h: ({pid for pid, _ in p} if p is not None else set()) for h, p in postings.items()}
-    size = {h: (sum(len(c) for _, c in p) if p is not None else 0) for h, p in postings.items()}
+    size = {h: (state.post_count(bytes.fromhex(h)) if p is not None else 0) for h, p in postings.items()}
 
     def plan(node):
         if node[0] == "leaf":
@@ -357,7 +357,8 @@ def _focus_evidence(state, hb: bytes, posting, focus_set):
         wire = [(cid.hex(), slot) for cid, slot in comp]
         segs.append([j, pid, wire])
         comps.append((pid, wire))
-    nb = [[j, posting[j][0], state.by_pid[posting[j][0]].v, H(enc_posting(posting[j][1])).hex()]
+    inner = state.post_inner(hb)                          # H(Enc(L_j)), kept with the snapshot
+    nb = [[j, posting[j][0], state.by_pid[posting[j][0]].v, inner[j].hex()]
           for j in sorted(nb_pos)]
     tree = state.post_tree(hb)
     opened = sorted(seg_pos | nb_pos)
@@ -369,9 +370,10 @@ def _focus_evidence(state, hb: bytes, posting, focus_set):
 _HASH, _INT = 32, 8       # the size rule of baselines/wire_sizes.py (binary: hash 32 B, number 8 B)
 
 
-def _full_bytes(posting) -> int:
-    """Wire size of a full posting list L_h (as wire_sizes.amtp_proof_bytes counts it)."""
-    return _INT + sum(2 * _INT + len(comp) * (_HASH + _INT) for _, comp in posting)
+def _full_bytes(n_comps: int, n_postings: int) -> int:
+    """Wire size of a full posting list L_h of n_comps components holding n_postings files
+    (as wire_sizes.amtp_proof_bytes counts it)."""
+    return _INT + n_comps * 2 * _INT + n_postings * (_HASH + _INT)
 
 
 def _focus_bytes(ent) -> int:
