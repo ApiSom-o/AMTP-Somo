@@ -436,7 +436,8 @@ def write_manifest(csv_path):
             "dataset": DATASET_TAG, "machine": machine_info(),
             "amtp_gamma_v": os.environ.get("AMTP_GAMMA_V", "1") != "0",   # AMTP: γ with the version v (B4 study)
             "amtp_placement": os.environ.get("AMTP_PLACEMENT", "least"),   # AMTP: placement rule (amtp/variants.py)
-            "amtp_and_prune": os.environ.get("AMTP_AND_PRUNE", "0") == "1"}   # AMTP: AND pruning (amtp/server.py)
+            "amtp_and_prune": os.environ.get("AMTP_AND_PRUNE", "0") == "1",   # AMTP: AND pruning (amtp/server.py)
+            "amtp_part_results": os.environ.get("AMTP_PART_RESULTS", "0") == "1"}   # AMTP: result-only part check
     with open(out, "w", encoding="utf-8") as f:
         json.dump(info, f, indent=1, ensure_ascii=False)
     return out

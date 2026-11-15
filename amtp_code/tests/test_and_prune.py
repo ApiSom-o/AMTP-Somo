@@ -204,6 +204,7 @@ def test_no_full_keyword_is_rejected(prune, rich):
     """Every keyword in a valid focus form, but none in full: nothing bounds where a match can lie."""
     user, ctx, resp = _answer(rich)
     descs = {d["pid"]: d["v"] for d in resp["proof"]["partitions"]}
+    descs.update((pid, v) for pid, v in resp["proof"].get("versions", []))   # result-only part check form
     for e in resp["proof"]["evidence"]:
         if e["status"] == "present" and e.get("mode") != "focus":
             L = e.pop("L")

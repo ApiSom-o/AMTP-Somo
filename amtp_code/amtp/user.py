@@ -200,6 +200,15 @@ class DataUser:
         descs = {d["pid"]: d for d in resp["proof"]["partitions"]}
         if len(descs) != len(resp["proof"]["partitions"]):
             raise Reject("papc", "a partition descriptor appears twice")
+        vers = {pid: d["v"] for pid, d in descs.items()}      # PID -> v for every γ the user rebuilds
+        if "versions" in resp["proof"]:
+            # result-only partition check: the other covered partitions send only v, bound by γ (a wrong v
+            # gives a γ that is not in R^post, so ρ̂ misses the IMT)
+            plain = resp["proof"]["versions"]
+            pids = [pid for pid, _ in plain]
+            if pids != sorted(set(pids)) or any(pid in vers for pid in pids):
+                raise Reject("papc", "plain version list is not canonical or repeats a described partition")
+            vers.update((pid, v) for pid, v in plain)
         r_idx = bytes.fromhex(resp["R_idx"])
         ev = resp["proof"]["evidence"]
         focus_set = None
@@ -217,14 +226,14 @@ class DataUser:
                 continue
             hb = bytes.fromhex(e["h"])
             if e.get("mode") == "focus":
-                r_post = self._focus_root(e, descs, focus_set)
+                r_post = self._focus_root(e, vers, focus_set)
                 leaf = imt_leaf(hb, rho(hb, e["n_sel"], r_post), bytes.fromhex(e["next"]))
             else:
                 gammas = []
                 for pid, comp in e["L"]:
-                    if pid not in descs:
+                    if pid not in vers:
                         raise Reject("papc", f"no version supplied for partition {pid}")
-                    gammas.append(gamma(pid, descs[pid]["v"], comp))
+                    gammas.append(gamma(pid, vers[pid], comp))
                 leaf = imt_leaf(hb, rho(hb, len(e["L"]), merkle_root(gammas)), bytes.fromhex(e["next"]))
             if not multiverify(r_idx, e["n"], {e["pos"]: leaf},
                                [bytes.fromhex(x) for x in e["proof"]]):
@@ -237,7 +246,7 @@ class DataUser:
         return descs
 
     @staticmethod
-    def _focus_root(e, descs, focus_set) -> bytes:
+    def _focus_root(e, vers, focus_set) -> bytes:
         """R^post of a keyword sent as focus evidence. Opens its components in F (segs) and the two
         adjacent γ leaves around every partition of F it has no component in (nb), all in ONE multiproof
         of its R^post tree of n_sel leaves. γ leaves are in strictly increasing PID order (the DO's
@@ -248,9 +257,9 @@ class DataUser:
             raise Reject("papc", "a present keyword must have at least one posting component")
         leaves, label, seg_pids = {}, {}, set()
         for j, pid, comp in e["segs"]:
-            if pid not in descs:
+            if pid not in vers:
                 raise Reject("papc", f"no version supplied for partition {pid}")
-            leaves[j], label[j] = gamma(pid, descs[pid]["v"], comp), pid
+            leaves[j], label[j] = gamma(pid, vers[pid], comp), pid
             seg_pids.add(pid)
         for j, pid, v, inner in e["nb"]:
             if j in leaves:
@@ -286,16 +295,25 @@ class DataUser:
     def _check_partitions(self, resp, m_h, descs, results):
         m_cov = set().union(*m_h.values()) if m_h else set()
         s_cov = {pid for _, pid, _ in m_cov}
-        if set(descs) != s_cov:
-            raise Reject("part", "partition descriptors do not match the covered partitions")
+        if "versions" in resp["proof"]:
+            # result-only partition check: open exactly the locations of the files Eval(B_Q) selects; every
+            # other covered partition must appear in the plain version list (checked by PAPC through γ)
+            opened = boolean.evaluate(boolean.from_json(resp["B_Q"]), m_h)
+            plain = {pid for pid, _ in resp["proof"]["versions"]}
+            if set(descs) != {pid for _, pid, _ in opened} or plain != s_cov - set(descs):
+                raise Reject("part", "partition descriptors do not match the result partitions")
+        else:
+            opened = m_cov
+            if set(descs) != s_cov:
+                raise Reject("part", "partition descriptors do not match the covered partitions")
         where = {}
         for cid, pid, slot in m_cov:
             if where.setdefault(cid, (pid, slot)) != (pid, slot):
                 raise Reject("part", f"file {cid[:8]} claimed at two different locations")
-        # group the covered locations by partition once (O(|m_cov|)), instead of scanning
-        # all of m_cov for every partition (O(|S_cov| x |m_cov|))
+        # group the opened locations by partition once (O(|opened|)), instead of scanning
+        # all of them for every partition (O(|S_cov| x |m_cov|))
         by_pid = {}
-        for cid, pid, slot in m_cov:
+        for cid, pid, slot in opened:
             by_pid.setdefault(pid, []).append((cid, slot))
         dom_leaves, positions = {}, set()
         for pid, d in descs.items():
@@ -317,8 +335,9 @@ class DataUser:
                                [bytes.fromhex(x) for x in dp["proof"]]):
                 raise Reject("part", "partition root A = H(PID ‖ v ‖ R_P) is not in the "
                                      "domain's partition tree (forged partition)")
-        results["part"] = (True, f"{len(m_cov)} location(s) in {len(descs)} partition(s), "
-                                 f"one shared domain multiproof")
+        results["part"] = (True, f"{len(opened)} location(s) in {len(descs)} partition(s), "
+                                 f"one shared domain multiproof"
+                                 + (" (result files only)" if opened is not m_cov else ""))
 
     def _check_result(self, ctx, resp, m_h, results):
         m_hat = boolean.evaluate(boolean.from_json(ctx["B_Q"]), m_h)

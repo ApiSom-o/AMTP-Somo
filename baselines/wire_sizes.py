@@ -57,6 +57,8 @@ def amtp_proof_bytes(proof: dict) -> int:
     for d in proof["partitions"]:
         n += INT + INT + HASH + INT + INT + len(d["proof"]) * HASH   # PID, v, R_P, n_slots, pos, multiproof
     n += INT + len(proof["domain"]["proof"]) * HASH              # n, domain multiproof
+    if "versions" in proof:                                      # result-only partition check: (PID, v) list
+        n += INT + len(proof["versions"]) * (INT + INT)
     return n
 
 

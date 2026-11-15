@@ -78,6 +78,22 @@ def and_prune_on() -> bool:
     return _AND_PRUNE
 
 
+# Result-only partition check (study, default off): the server opens partition slots and domain-tree leaves
+# only for the returned files; the versions v of the other covered partitions travel as a plain list and are
+# bound by γ = H(PID ‖ v ‖ H(Enc(L))). AMTP_PART_RESULTS=1 or set_part_results(True). The user accepts both
+# answer forms whatever this setting is (amtp/user.py).
+_PART_RESULTS = os.environ.get("AMTP_PART_RESULTS", "0") == "1"
+
+
+def set_part_results(on: bool) -> None:
+    global _PART_RESULTS
+    _PART_RESULTS = bool(on)
+
+
+def part_results_on() -> bool:
+    return _PART_RESULTS
+
+
 def gamma_inner(pid: str, v: int, inner: bytes) -> bytes:
     """γ from its inner hash H(Enc(L)): H(PID ‖ v ‖ inner), or H(PID ‖ inner) when γ leaves v out"""
     return H(pid, v, inner) if _GAMMA_V else H(pid, inner)

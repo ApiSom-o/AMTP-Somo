@@ -12,7 +12,7 @@ from .dht import DHT, StorageError
 from .engine import Engine
 from .update import delta, enc_aff, request_digest
 from .core.hashing import H, TAG_QUERY, enc_bq, enc_posting
-from .index import SENTINEL_LO, and_prune_on
+from .index import SENTINEL_LO, and_prune_on, part_results_on
 
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
     """H(tag ‖ i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η): the message under τ_Q, all fields binary."""
@@ -255,6 +255,15 @@ def build_response(state, b_q, nonce, dht, timing=None):
     slots_by_pid = {}
     for _, pid, slot in m_cov:
         slots_by_pid.setdefault(pid, set()).add(slot)
+    versions = None
+    if part_results_on():
+        # result-only partition check: open only the returned files' slots; the other covered partitions
+        # send just their version v (bound by γ), for the user's PAPC check
+        opened = {}
+        for _, pid, slot in m_q:
+            opened.setdefault(pid, set()).add(slot)
+        versions = [[pid, state.by_pid[pid].v] for pid in sorted(slots_by_pid) if pid not in opened]
+        slots_by_pid = opened
     s_cov = sorted(slots_by_pid)
 
     partitions = []
@@ -282,10 +291,13 @@ def build_response(state, b_q, nonce, dht, timing=None):
         timing.update(lookup=(t1 - t0) * 1e3, eval=(t2 - t1) * 1e3, proof=(t3 - t2) * 1e3,
                       fetch=(t4 - t3) * 1e3)
 
+    proof = {"evidence": evidence, "partitions": partitions, "domain": domain_proof}
+    if versions is not None:
+        proof["versions"] = versions
     return {
         "domain": state.domain, "epoch": state.epoch, "B_Q": b_q, "nonce": nonce,
         "R_part": state.R_part.hex(), "R_idx": state.R_idx.hex(), "R_ct": r_ct,
-        "proof": {"evidence": evidence, "partitions": partitions, "domain": domain_proof},
+        "proof": proof,
     }
 
 
