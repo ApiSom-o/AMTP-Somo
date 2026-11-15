@@ -499,13 +499,17 @@ class Validator:
                         raise Invalid("missing neighbour of a new posting component")
                     if (k > 0 and not labels[k - 1] < p) or (k < n_sel and not p < labels[k]):
                         raise Invalid("a new posting component is not inserted in PID order")
-                gone = {pos[p] for p in old_p if p not in new_p}
+                new_set = set(new_p)                    # membership tests below: O(1), not a list scan
+                gone = {pos[p] for p in old_p if p not in new_set}
+                at = {}                                 # insertion point -> new components, in `fresh` order
+                for p in fresh:
+                    at.setdefault(ins[p], []).append(p)
                 out = []
                 for j in range(n_sel + 1):
-                    out += [leaf_hash(g_new(h, p)) for p in fresh if ins[p] == j]
+                    out += [leaf_hash(g_new(h, p)) for p in at.get(j, ())]
                     if j < n_sel and j not in gone:
                         p = labels.get(j)
-                        out.append(leaf_hash(g_new(h, p)) if p in pids and p in new_p else leaf_hash(gl[j]))
+                        out.append(leaf_hash(g_new(h, p)) if p in pids and p in new_set else leaf_hash(gl[j]))
                 if out:
                     rho_new[h] = rho(h, len(out), root_of_leaf_hashes(out))
                 else:
@@ -532,7 +536,8 @@ class Validator:
             touched[h] = (ev["pos"], ev["rho"], ev["next"])
         size_old = tree_size(n_old)
         free_used = list(pi["free_used"])
-        appended = sorted(keys["pos_new"] for h, keys in pi["keys"].items() if h in added
+        added_set = set(added)                          # membership below: O(1), not a list scan
+        appended = sorted(keys["pos_new"] for h, keys in pi["keys"].items() if h in added_set
                           and keys["pos_new"] >= n_old)
         if appended != list(range(n_old, n_old + len(appended))):
             raise Invalid("appended IMT positions are not contiguous")

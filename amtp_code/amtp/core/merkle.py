@@ -8,17 +8,38 @@ A multiproof contains only the sibling hashes the verifier cannot compute
 itself, so leaves that share a path share hashes. This is the building block
 of ASPA (Authenticated Selective Proof Assembly).
 """
-from .hashing import H
+import hashlib
+
+from .hashing import H, HashCounter
 
 PAD = H(b"\x02")
 
+# Fast paths for bytes input: the same length-prefixed byte string H builds (4-byte length ‖ tag,
+# then 4-byte length ‖ each part), hashed in one call, counted exactly as H counts. Anything that is
+# not bytes goes through H itself, so its behaviour (encoding, errors) is unchanged.
+_sha256 = hashlib.sha256
+_LEAF_TAG = (1).to_bytes(4, "big") + b"\x00"
+_NODE_TAG = (1).to_bytes(4, "big") + b"\x01"
+_LEN32 = (32).to_bytes(4, "big")
+
 
 def leaf_hash(value: bytes) -> bytes:
-    return H(b"\x00", value)
+    if type(value) is not bytes:
+        return H(b"\x00", value)
+    k = len(value)
+    HashCounter.calls += 1
+    HashCounter.bytes += 9 + k
+    return _sha256(_LEAF_TAG + (_LEN32 if k == 32 else k.to_bytes(4, "big")) + value).digest()
 
 
 def node_hash(left: bytes, right: bytes) -> bytes:
-    return H(b"\x01", left, right)
+    if type(left) is not bytes or type(right) is not bytes:
+        return H(b"\x01", left, right)
+    a, b = len(left), len(right)
+    HashCounter.calls += 1
+    HashCounter.bytes += 13 + a + b
+    return _sha256(_NODE_TAG + (_LEN32 if a == 32 else a.to_bytes(4, "big")) + left
+                   + (_LEN32 if b == 32 else b.to_bytes(4, "big")) + right).digest()
 
 
 def _size(n: int) -> int:
@@ -107,24 +128,37 @@ def root_from_proof(size: int, known: dict, proof: list):
     the padding (their hash is then PAD), which lets an updater replay appends."""
     if not known or any(not (0 <= i < size) for i in known):
         return None
-    known = dict(known)
-    remaining, k = list(proof), 0
+    # One sort, then each level is walked left to right: a node is paired with its known sibling
+    # or with the next proof hash, parents come out already in position order. Siblings are taken
+    # from the proof in exactly the order of the previous per-level sorted scan.
+    level = sorted(known.items())
+    remaining = list(proof)
+    k, total = 0, len(remaining)
     while size > 1:
-        nxt = {}
-        for p in sorted({i // 2 for i in known}):
-            pair = []
-            for child in (2 * p, 2 * p + 1):
-                if child in known:
-                    pair.append(known[child])
-                elif k < len(remaining):
-                    pair.append(remaining[k])
+        nxt = []
+        i, m = 0, len(level)
+        while i < m:
+            pos, h = level[i]
+            if pos % 2 == 0:
+                if i + 1 < m and level[i + 1][0] == pos + 1:
+                    right = level[i + 1][1]
+                    i += 2
+                elif k < total:
+                    right = remaining[k]
                     k += 1
+                    i += 1
                 else:
                     return None
-            nxt[p] = node_hash(pair[0], pair[1])
-        known = nxt
+                nxt.append((pos // 2, node_hash(h, right)))
+            else:
+                if k >= total:
+                    return None
+                nxt.append((pos // 2, node_hash(remaining[k], h)))
+                k += 1
+                i += 1
+        level = nxt
         size //= 2
-    return known.get(0) if k == len(remaining) else None
+    return level[0][1] if k == total and level[0][0] == 0 else None
 
 
 def pad_root(size: int) -> bytes:
