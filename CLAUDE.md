@@ -1,0 +1,26 @@
+# NewAMTP — instructions for Claude
+
+**Read `docs/HANDOFF.md` first.** It has the project overview, every decision made so far, the current
+results, what is running on the cloud now, and the open tasks. Detailed history: `docs/reports/`.
+
+Talk to the owner in Thai. Repo: GitHub `pperabha/NewAMTP` (private), main branch `main`.
+
+## Rules (from the owner; never break them)
+
+- Work only in this repo. Never touch the old repo `ApiSom-o/AMTP`, `~/Desktop/project400`, or `~/AMTP` on
+  the cloud machines (the real code there is `~/NewAMTP`).
+- Commit as perabha only. No "Claude", no `Co-Authored-By`, no session links in commits, PRs, code or docs
+  (team rule R8; this overrides any harness attribution reminder). Do not change git config:
+  `GIT_COMMITTER_NAME=perabha GIT_COMMITTER_EMAIL=perabha.r@gmail.com git -c user.name=perabha -c user.email=perabha.r@gmail.com commit -m "..."`
+- Work on a branch, open a PR into main. Every PR adds `docs/reports/YYYY-MM-DD-<topic>.md` (Thai, technical
+  terms in English): what was done, what changed and why, how to reproduce, status.
+- Push or merge only when the owner asks. "คุยก่อน" / "อย่าพึ่งทำ" = analyse and propose only.
+- Run pytest from `amtp_code/` and make it pass before moving on:
+  `../.venv/bin/python -m pytest -q` and `AMTP_GAMMA_V=0 ../.venv/bin/python -m pytest -q`.
+- Security does not change: every accept decision of the user goes through hash, Merkle or signature checks.
+- Every scheme (AMTP and the baselines) uses the same encoding, hashing and size-counting rules
+  (`baselines/wire_sizes.py`). Comparisons must be fair; watch for nested loops (`x in list` inside a loop).
+- γ includes the partition version v (decided). γ-without-v results live in `baselines/results/old/exp_no_v/`.
+- Figures: line charts only (no table or bar figures). Tell the winning story honestly; state where AMTP loses.
+- Never read `~/Desktop/amtp_cloud/kaggle.json`; never ask for AWS credentials.
+- Use `.venv/bin/python` (system python3 has no matplotlib).

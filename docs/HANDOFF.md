@@ -1,0 +1,264 @@
+# HANDOFF — ทุกอย่างที่ต้องรู้เพื่อทำงาน NewAMTP ต่อ (15 พ.ย. 2026)
+
+เอกสารนี้เขียนให้ผู้ช่วย (Claude) ในบัญชีใหม่ของเจ้าของงาน อ่านไฟล์นี้ไฟล์เดียวแล้วทำงานต่อได้ทันที
+เนื้อหาสรุปจากการทำงานตลอด 13–15 พ.ย. ส่วนรายละเอียดแต่ละเรื่องอยู่ใน `docs/reports/` (ทุก PR มีรายงาน 1 ไฟล์)
+
+---
+
+## 0. เริ่มต้นอ่านอะไรก่อน
+
+| ลำดับ | ไฟล์ | ทำไม |
+|---|---|---|
+| 1 | ไฟล์นี้ | ภาพรวม กติกา สถานะ งานค้าง |
+| 2 | `CLAUDE.md` (root) | กติกาสั้นๆ ที่ต้องทำตามทุกครั้ง |
+| 3 | `docs/ENGINE_REDESIGN.md` | เป้าหมายของ engine, กติกาทีม R1–R9, register คอขวด B#/W# |
+| 4 | `docs/AMTP_PAPER.md` | scheme ตาม paper |
+| 5 | `docs/reports/*.md` (เรียงตามวันที่) | ประวัติการตัดสินใจและผลแต่ละรอบ |
+
+---
+
+## 1. งานนี้คืออะไร
+
+- **โปรเจกต์:** AMTP (Adaptive Merkle-tree … verifiable keyword search บนข้อมูลเข้ารหัสหลาย domain) เป็นงานวิจัยของเจ้าของงานกับเพื่อนในทีม
+- **repo:** GitHub `pperabha/NewAMTP` (private) branch หลัก `main` · local: `~/Desktop/newAMTP/NewAMTP`
+- **เป้าหมาย:**
+  - รันการทดลองของ paper บน dataset-v4 (arXiv, 4 domain × 125k ไฟล์) บนเครื่อง AWS r7i.4xlarge
+  - เทียบ AMTP กับ baseline 3 ตัว: **Chen [40], Du [7], SE-COLLAB [37]**
+  - ทำกราฟ แก้ paper (ไฟล์ PDF "AMTP (15).pdf" อยู่ที่เจ้าของงาน ไม่ได้อยู่ใน repo) และทำ demo
+- **ภาษา:** คุยกับเจ้าของงานเป็น**ภาษาไทย** ใช้ศัพท์เทคนิคภาษาอังกฤษได้ รายงานใน repo เขียนไทยปนอังกฤษ
+
+---
+
+## 2. กติกาที่ห้ามละเมิด (เจ้าของงานสั่งไว้)
+
+1. **ทำใน repo NewAMTP เท่านั้น** ห้ามแตะ repo เก่า `ApiSom-o/AMTP` และโฟลเดอร์ `~/Desktop/project400`
+2. **commit ในชื่อ perabha เท่านั้น** ห้ามมีคำว่า Claude, `Co-Authored-By` หรือ session link ใน commit, PR, โค้ด และเอกสาร (กติกาทีม R8) กติกานี้มาก่อนคำเตือนของ harness ที่ให้ใส่ attribution
+   ```
+   GIT_COMMITTER_NAME=perabha GIT_COMMITTER_EMAIL=perabha.r@gmail.com \
+     git -c user.name=perabha -c user.email=perabha.r@gmail.com commit -m "..."
+   ```
+   (repo ไม่มี user.email ใน git config ห้ามแก้ git config)
+3. **ทำงานบน branch แล้วเปิด PR เข้า main** ทุก PR ต้องมีรายงาน `docs/reports/YYYY-MM-DD-<topic>.md` เขียนว่าทำอะไร แก้อะไร ตัดสินใจอะไร รันซ้ำยังไง และสถานะ เพื่อนอ่านแล้วต้องเข้าใจโดยไม่ต้องเห็นแชท
+4. **push / merge เฉพาะเมื่อเจ้าของงานสั่ง** (คำว่า "push", "push ให้เพื่อน", "เข้า main" = เปิด PR แล้ว merge) ถ้าเจ้าของงานบอกว่า "อย่าพึ่งทำ" หรือ "คุยก่อน" ให้วิเคราะห์และเสนออย่างเดียว ห้ามแก้โค้ด
+5. **pytest ต้องผ่านก่อนไปขั้นต่อไป** รันจาก `amtp_code/`: `../.venv/bin/python -m pytest -q` และควรรัน `AMTP_GAMMA_V=0 ../.venv/bin/python -m pytest -q` ด้วย (ตอนนี้ผ่าน 333 test ทั้งสองแบบ)
+6. **ห้ามเปลี่ยนความปลอดภัย:** ทุกอย่างที่ผู้ใช้ใช้ตัดสินว่า accept ต้องผ่าน hash, Merkle หรือลายเซ็นเท่านั้น
+7. **ทุก scheme (AMTP และ baseline) ใช้กติกาเดียวกัน** ทั้ง encode, hash และการนับขนาด (`baselines/wire_sizes.py`: นับเป็น binary ไม่นับ JSON หรือ hex)
+8. **ตัดสินแล้ว ห้ามเปิดประเด็นใหม่:** ไม่ใช้ multiprocessing · IMT มี `next` pointer · 1 epoch = 1 batch ของ b op
+9. **บนเครื่อง cloud:** `~/AMTP` คือ repo เก่า ห้ามแก้ (งานจริงอยู่ที่ `~/NewAMTP`)
+10. **ห้ามอ่าน** `~/Desktop/amtp_cloud/kaggle.json` · **ห้ามขอ** AWS credential จากเจ้าของงาน
+11. ผลการทดลอง commit ได้แล้ว (เดิมห้าม แต่เจ้าของงานยกเลิกกติกานี้เพื่อให้เพื่อนเห็นผล) รวมถึง `baselines/results/runs/` ยกเว้นไฟล์สถานะของ watcher (`.seen_*`, `.pulled_*`) และ smoke run บน Mac (`runs/smoke_*`) ซึ่งมี path ในเครื่อง
+
+---
+
+## 3. สิ่งที่ตัดสินใจไปแล้ว
+
+| เรื่อง | การตัดสินใจ |
+|---|---|
+| γ | **γ = H(PID ‖ v ‖ H(Enc(L)))** มี version v (paper eq. 17) ผลแบบไม่มี v ย้ายไป `baselines/results/old/exp_no_v/` แล้ว (PR #15) โค้ดยังรองรับ `AMTP_GAMMA_V=0` |
+| เวลาของ ex3 (update) | update = request + CS + **Validator** + anchor (paper เขียนว่าไม่นับ Validator ต้องแก้ข้อความใน paper ให้ตรง ยังไม่ได้แก้) |
+| สถิติ | 15 รอบ หลัง warm-up 3 รอบ · ค่าต่อ query = median ของรอบ · ค่าต่อจุด = median ข้าม query · KB = 1000 B · `hash_calls` ใช้เป็นตัวเลขที่ไม่ขึ้นกับเครื่อง |
+| ablation (ex4) | เทียบ AMTP กับ Static-MT และ **Global-MT(v)** (มี v เหมือนกันเพื่อความยุติธรรม) · Global-MT แบบไม่มี v เก่าใช้เทียบไม่ได้ · Global-MT(v) รันแยกด้วย `bench.ablation --variants` ด้วย seed และ workload เดียวกับ w1 |
+| θ_max | ค่าหลัก 64 (`docs/THETA_CHOICE.md`) มีผลที่ 128 และ 256 ด้วย |
+| กราฟ | **เจ้าของงานไม่เอากราฟแบบตารางหรือแท่ง** เอาแต่กราฟเส้น อยากได้รูปที่เล่าด้านที่เราชนะ แต่ต้องซื่อสัตย์ หัวกราฟต้องบอกจุดที่วัด ด้านที่แพ้เก็บไว้ใน `graph_op/limits/` |
+| Exp 2 layouts | พักไว้ ยังไม่รันเพิ่ม |
+
+---
+
+## 4. แผนที่โค้ด
+
+```
+amtp_code/
+  amtp/                 โค้ด scheme
+    engine.py           index ฝั่ง server: partition, posting, IMT, γ/ρ, การสร้าง π^upd
+    server.py           CloudServer, build_response (ASPA multiproof)
+    user.py             DataUser: make_query, verify (7 check: ctx, anchor, idx, papc, part, comp, ct), decrypt
+    validator.py        Validator ของ DO: ตรวจ update proposal (_imt_root, check_removed_predecessors, bracket_new_keys)
+    variants.py         AdaptivePolicy (AMTP), StaticPolicy, GlobalPolicy (versioned=True คือ Global-MT(v))
+    bptree.py           B+ Search Tree (h → {pid: {cid: slot}}) ใช้ให้หาเร็ว ไม่ใช่หลักฐาน
+    core/merkle.py      Merkle tree + multiproof (leaf/node hash แบบเรียก SHA-256 ครั้งเดียว ตั้งแต่ PR #16)
+    core/hashing.py     H() แบบ length-prefixed, HashCounter, encoding
+    core/crypto.py      AES-GCM, CT format (make_ct/pack_ct), attribute wrap C_Kd
+    web/app.py          demo (Flask) · scenario.py, adversary.py
+  bench/
+    experiments.py      ทุก suite: search1, verify1, tamper, xsearch, xverify, xdomains, exp3, exp5, ...
+    ablation.py         split/merge (ex4) · --variants "AMTP,Static-MT,Global-MT,Global-MT(v)"
+  tests/                333 test (มี test เทียบกับโค้ดเดิม: test_validator_imt_checks.py, test_fast_hash_paths.py)
+baselines/
+  chen_et_al_sim.py, du_et_al_sim.py, se_collab_sim.py   baseline
+  wire_sizes.py         กติกานับขนาดร่วมกันทุก scheme
+  plot_paper.py         กราฟตามแผนของ paper → <run>/figures/ (ex1–ex5)
+  plot_story.py         กราฟเล่าเรื่อง → new_amtp_result/graph_op/{main,limits}/
+  plot_results.py       style ของกราฟ (สี/marker ของแต่ละ scheme) ใช้ร่วมกัน
+  old/                  สคริปต์ plot เก่าที่ไม่ใช้แล้ว
+  results/
+    new_amtp_result/gamma_with_v/   ชุดผลหลัก (CSV + manifest + figures) ← ใช้ชุดนี้
+    new_amtp_result/graph_op/       กราฟเล่าเรื่อง
+    runs/cloud/w1..w10/             ผลดิบจากแต่ละเครื่อง + log
+    old/exp_no_v/                   ผลแบบไม่มี v (เก็บไว้เฉยๆ)
+scripts/
+  cloud_worker.sh       แผนรันบนเครื่อง cloud แต่ละเครื่อง
+  watch_stop.sh         รันบนเครื่อง cloud: ดับเครื่องเมื่องานจบ (หลังรอ 10 นาที) หรือว่างเกิน 30 นาที
+  merge_runs.py         รวมผลจากหลายเครื่อง
+  cloud_helpers/        สคริปต์ที่ใช้ระหว่างงาน 14–15 พ.ย. (ดูหัวข้อ 7)
+docs/reports/           รายงานต่อ PR
+```
+
+**Python:** ใช้ `.venv/bin/python` ที่ root ของ repo (python3 ของระบบไม่มี matplotlib) ส่วน charm-crypto ติดตั้งอยู่ใน .venv แล้ว
+
+---
+
+## 5. ผลหลักตอนนี้ (γ มี v, บน cloud)
+
+ทุกตัวเลขอยู่ใน `baselines/results/new_amtp_result/gamma_with_v/` และ `graph_op/figure_points.csv`
+
+**การจับการโจมตี** (keyword ที่มี 2,021 ผลลัพธ์, t = 5–1,000 ไฟล์ถูกแก้, D1–D4):
+
+| | modify | hide | inject | old_version | ฟ้องผิด |
+|---|---|---|---|---|---|
+| AMTP | ✓ | ✓ | ✓ | ✓ | 0/60 |
+| SE-COLLAB | ✓ | ✗ | ✗ | ✓ | 0 |
+| Du | ✓ | ✓ | ✗ | ✓ | 0 |
+| Chen | N/A | ✓ | ✓ | N/A | 0 |
+
+Chen ไม่ส่งไฟล์กลับ จึงทดสอบ modify และ old_version กับ Chen ไม่ได้
+
+**ขนาด proof** (rQ = 2,550): AMTP 573 KB · SE-COLLAB 1,431 KB (2.5×) · Du 8,711 KB (15×) · Chen 0 B (ไม่มี proof แยก) · แต่ที่ rQ = 10 SE-COLLAB เล็กกว่าเล็กน้อย
+
+**เวลา query** (kQ = 5, N = 100k, AND, ก่อน PR #16):
+- end-to-end: AMTP 10.7 ms · SE-COLLAB 9.1 · Chen 2.1 · Du 0.5
+- เวลาของ AMTP 79% อยู่ที่ผู้ใช้ตรวจผล: part 76%, papc 20%
+- ฝั่ง server AMTP (2.1 ms) เร็วกว่า SE-COLLAB (4.8 ms)
+- AMTP เร็วกว่า SE-COLLAB เมื่อผลลัพธ์ไม่เกิน ~322 ไฟล์, ไฟล์ต่อ domain ไม่เกิน ~76k หรือ kQ ไม่เกิน ~4.5
+
+**ex3 update** (หลังแก้ Validator, b = 1000 insert): AMTP 76 s · Chen 1.37 s → AMTP ช้ากว่า Chen 56–104× (เป็นราคาของการที่ Validator ตรวจทุก epoch)
+
+**ex4 split/merge** (median ต่อ batch):
+
+| θ_max | AMTP | Static-MT | AMTP เร็วกว่า | partition ใหญ่สุด AMTP / Static |
+|---|---|---|---|---|
+| 64 | 4.9 s | 24.2 s | 4.9× | 64 / 629 |
+| 128 | 8.9 s | 37.3 s | 4.2× | 128 / 1,027 |
+| 256 | 13.7 s | 37.5 s | 2.7× | 256 / 1,621 |
+
+Global-MT(v) ที่ θ = 64 (ผลบางส่วน, 794 batch แรก): update 56.7 s ต่อ batch (ช้ากว่า AMTP 13×) แต่ query เร็วกว่า AMTP ~1.7× (verify 23 เทียบ 40 ms) เพราะมี partition เดียว **AMTP ไม่ได้ชนะทุกด้าน** แต่ได้สมดุลที่ดีกว่า: AMTP คุ้มกว่าจนกว่าจะมี query เกิน ~2,600 ครั้งต่อ epoch
+
+**ex5 หลาย domain:** query บน domain เดียวใช้ 4.0 → 4.1 ms จาก 1 ถึง 32 domain (SE-COLLAB 8.9 ms) · update หนึ่ง domain ใช้ 106–112 ms คงที่
+
+---
+
+## 6. โค้ดชุดไหนสร้างผลชุดไหน (สำคัญมาก)
+
+| ผล | commit ที่รัน | หมายเหตุ |
+|---|---|---|
+| ex1, ex2, tamper, ex4 θ = 64/128/256, ex5 | `7485556` | รอบหลักบน 10 เครื่อง |
+| ex3 (update) | `a131032` | หลังแก้ลูปซ้อนจุดแรกใน Validator (PR #11) |
+| Global-MT(v) θ = 64 (กำลังรัน) | `089726d` | `--variants "Global-MT(v),Global-MT"` |
+| **main ตอนนี้** | หลัง PR #16 | ตรวจ Merkle เร็วขึ้น 1.2–1.25× (hash เท่าเดิมทุกตัว) และแก้ลูปซ้อนที่เหลือใน Validator **ยังไม่ได้รันบน cloud** ถ้าจะใช้ตัวเลขเวลาใหม่ต้องรัน ex1, ex2, ex3, ex5 ของ AMTP ใหม่ (ex4 ไม่กระทบ) |
+
+---
+
+## 7. งานที่กำลังรันอยู่: w3 (Global-MT(v)) — ต้องดึงผลเมื่อเสร็จ
+
+- เครื่อง `amtp-worker3` IP `43.209.20.247` (IP เปลี่ยนทุกครั้งที่เปิดเครื่องใหม่) user `ubuntu`
+- กุญแจ SSH: `~/Desktop/amtp_cloud/amtp-key.pem` (อยู่ในเครื่องเจ้าของงาน ไม่อยู่ใน repo)
+- ความคืบหน้า: 15 พ.ย. 13:15 (เวลาไทย) อยู่ที่ batch 793 จาก 1,674 · batch ละ ~70 วินาที · **คาดว่าเสร็จจันทร์ 16 พ.ย. ราว 03:00–08:00 เวลาไทย**
+- บนเครื่องมี `watch_gmtv.sh` รันอยู่ งานจบแล้วจะ**ดับเครื่องเองใน ~10 นาที** ผลยังอยู่ในดิสก์
+- ผลอยู่ที่ `~/NewAMTP/baselines/results/runs/paper_v_gmtv/amtp/splitmerge_n100000_t64/` (updates.csv, layout.csv, queries.csv, manifest.json, summary.md) · log อยู่ที่ `~/gmtv_w3.log`
+
+**ขั้นตอนเมื่อเสร็จ:**
+1. ถ้าเครื่องดับแล้ว ให้เจ้าของงานเปิดใน AWS Console แล้วส่ง IP ใหม่มา ถ้า IP บ้านของเจ้าของงานเปลี่ยน ต้องแก้ Security Group (SSH port 22) ให้รับ IP ปัจจุบันของ Mac (ดูได้ด้วย `curl -s https://checkip.amazonaws.com`)
+2. ดึงผล:
+   ```
+   rsync -a -e "ssh -i ~/Desktop/amtp_cloud/amtp-key.pem" \
+     ubuntu@<IP>:NewAMTP/baselines/results/runs/paper_v_gmtv baselines/results/runs/cloud/w3/
+   rsync -a -e "ssh -i ~/Desktop/amtp_cloud/amtp-key.pem" ubuntu@<IP>:gmtv_w3.log baselines/results/runs/cloud/w3/
+   ```
+3. เช็ก: Global-MT(v) ครบ 1,674 batch ไหม · log มี FAIL ไหม · manifest เป็น commit 089726d และ `git_dirty: false`
+4. **เช็กว่า w3 เร็วเท่า w1:** w3 รัน Global-MT (ไม่มี v) ด้วย ให้เทียบเวลาต่อ hash กับ Global-MT ของ w1 (`gamma_with_v/amtp/splitmerge_n100000_t64/updates.csv`) ช่วงแรกเช็กแล้วต่างกันแค่ ~6% (1.86 เทียบ 1.98 µs ต่อ hash) ถ้าต่างกันมาก ต้องเขียนกำกับไว้ หรือใช้ hash_calls เทียบแทน
+5. plot: เพิ่ม Global-MT(v) เป็นเส้นที่สามในรูป split/merge
+   - `plot_story.py` (ค่าคงที่ `SM_VARIANTS` และฟังก์ชัน `sm_rows` ซึ่งตอนนี้อ่านแค่โฟลเดอร์ใน gamma_with_v ต้องอ่านไฟล์ของ w3 ด้วย)
+   - และ/หรือรวม CSV เข้า gamma_with_v แล้วใช้ `plot_paper.py` (มี `EXP4_STYLE["Global-MT(v)"]` อยู่แล้วใน plot_results.py)
+6. เขียนรายงาน แล้วเปิด PR และ merge (เจ้าของงานอนุญาตไว้แล้วว่าผล cloud ที่เสร็จให้ push ให้เพื่อนเห็นได้เลย ถ้าเจอปัญหาให้หยุดถามก่อน)
+
+**watcher ฝั่ง Mac** (`scripts/cloud_helpers/watch_gmtv_local.sh`): ทุก 3 นาทีจะเช็กเครื่องแล้ว rsync ผลมาเมื่องานจบ ต้องตั้ง `REPO` ให้ชี้ที่ repo ถ้าไม่ได้อยู่ที่ path default ถ้าใช้ Monitor ของ Claude Code จะหมดเวลาทุก 30 นาที ต้องเปิดใหม่
+
+---
+
+## 8. งานค้างและเรื่องที่รอเจ้าของงานตัดสินใจ
+
+| # | เรื่อง | สถานะ / ข้อเสนอ |
+|---|---|---|
+| 1 | ผล Global-MT(v) ของ w3 | ดูหัวข้อ 7 |
+| 2 | **รันบน cloud ใหม่หลัง PR #16** | ยังไม่ได้ตัดสินใจ ถ้ารันต้องรัน ex1, ex2, ex3, ex5 ของ AMTP (baseline ใช้ผลเดิมได้ เพราะโค้ดไม่เปลี่ยน) คาดว่า ex3 insert ที่ b = 1000 จะลดลงชัด เพราะแก้ลูป `h in added` แล้ว |
+| 3 | **ขนาดไฟล์ที่ส่งกลับใหญ่กว่า baseline 307 B ต่อไฟล์** | ส่วนเกินมาจาก C_Kd 160 B, aad 52 B, cid+PID+ℓ +40 B, ห่อ body 31 B, หัว CT ~24 B · **C_Kd ถูกเก็บเป็นข้อความ hex** (`aes_gcm_encrypt` คืน hex แล้ว `enc(ck)` เก็บข้อความนั้น) ใหญ่ขึ้น ~60 B และขัดกติกา "นับเป็น binary" · ทางเลือก: ก. เก็บเป็น binary, ข. แยกต้นทุน access control ให้เห็นใน paper, ค. เลิกส่ง cid ซ้ำ (ต้องยืนยันก่อน) · เจ้าของงานยังไม่ตัดสินใจ · ไม่กระทบกราฟที่มี เพราะทุกกราฟใช้ proof_bytes ไม่ใช่ response_bytes |
+| 4 | **ลดเวลาตรวจลงอีก** (อาจารย์เสนอ reuse proof / cache proof) | เสนอไว้แล้ว ยังไม่ได้ทำ ดูหัวข้อ 9 |
+| 5 | ข้อความใน paper | ยังไม่ได้แก้ ต้องแก้: เครื่อง (AWS ไม่ใช่ Mac), 15 รอบ (ไม่ใช่ 30), dataset 4 × 125k, พารามิเตอร์ Exp1–4, Exp3 นับ Validator, ส่วน Results / Conclusion / การทดลอง tamper · ยังไม่ได้ตกลงว่าใครเขียน |
+| 6 | demo | เพื่อน (PrimRoseEverD) push "Demo v2" เข้า main แล้ว (`amtp_code/web/`) ยังไม่ได้ทดสอบ |
+| 7 | ข้อเขียนของเพื่อนเรื่อง "จุดที่ชู / จุดที่ต้องยอมรับ" | ตรวจกับตัวเลขแล้ว · ข้อ "update ต่อไฟล์คงที่เมื่อฐานข้อมูลโต" ไม่จริง ควรเขียนว่า "โตช้ากว่า Static-MT มาก" · "ต้นทุนคงที่เมื่อเพิ่มโดเมน" ต้องเติม "ที่ domain เดียว" · "proof ต่อรายการเล็กลงเมื่อผลลัพธ์เยอะ" ถูก (617 → 224 B ต่อผลลัพธ์ ส่วน SE-COLLAB คงที่ 561 B) · "search โตตามความยาว posting" ถูก · ควรเพิ่มเรื่อง "update ช้ากว่า Chen" ในส่วนที่ต้องยอมรับ |
+| 8 | ข้อความใน paper เรื่อง ex3 | paper เขียนว่าไม่นับ Validator แต่เราเลือกนับ ต้องแก้ข้อความ |
+
+---
+
+## 9. เรื่องลดเวลา (วิเคราะห์ไว้แล้ว ยังไม่ได้ทำ ยกเว้นข้อ A)
+
+**ข้อเท็จจริงจาก profile** (kQ = 5, N = 100k):
+- ผู้ใช้ hash ~4,700 ครั้งต่อ query
+- posting ของ keyword หนึ่งกระจายอยู่หลายร้อย partition ทำให้ทุก posting ต้องมี path ภายใน partition บวก path ใน domain tree ซึ่งเป็นต้นทุนหลักของ check part
+
+| แนวทาง | สถานะ | ผล / ข้อควรระวัง |
+|---|---|---|
+| A. ปรับโค้ดตรวจ (hash เท่าเดิม) | **ทำแล้ว PR #16** | เร็วขึ้น 1.2–1.25× · ปรับต่อได้อีกไม่มาก เพราะเวลาที่เหลือเป็น SHA-256 จริงกับ logic ของการตรวจ |
+| B. cache ฝั่งผู้ใช้ (reuse proof) | เสนอแล้ว | เก็บของที่ตรวจผ่านแล้ว (keyword → L, partition → (v, R_P), (R_P, slot) → cid) โดยใช้ root ของ epoch เป็น key และเก็บหลัง accept เท่านั้น · ข้าม epoch ได้ถ้า v / ρ ไม่เปลี่ยน (จุดที่ v ช่วยให้เล่าได้ดี) · ช่วยแค่ query ที่ keyword ซ้ำ ไม่ช่วย query แรก · ต้องวัด cold กับ warm แยกกัน และผลหลักใน paper ต้องเป็น cold เพราะ baseline ก็ cache ได้ |
+| C. จัดไฟล์ที่ keyword เดียวกันไว้ partition เดียวกัน | เสนอแล้ว | ลดจำนวน partition ต่อ query ต้องวัดก่อน |
+| D. AND pruning | future work | เปลี่ยนโครงสร้าง index และ proof |
+| E. accumulator (RSA / pairing) | ไม่แนะนำ | แพง และขัดกติกาที่ให้ใช้แค่ hash / Merkle / ลายเซ็น |
+
+เจ้าของงานสั่งชัดว่า "อย่าพึ่งลดจำนวน hash" (ข้อ B–D) ต้องรอคำสั่งก่อน
+
+---
+
+## 10. วิธีทำงานกับเครื่อง cloud (บทเรียนที่เจอ)
+
+- 10 เครื่อง r7i.4xlarge (16 vCPU) ชื่อ `amtp-worker1..10` · โค้ดอยู่ที่ `~/NewAMTP` · venv อยู่ที่ `~/NewAMTP/.venv` · ทุกเครื่องมี `scripts/watch_stop.sh` สำหรับดับเครื่อง
+- **IP เปลี่ยนทุกครั้งที่ start เครื่อง** ต้องให้เจ้าของงานส่ง IP มา · **IP บ้านของเจ้าของงานก็เปลี่ยนได้** ถ้า ssh timeout ให้เช็ก IP ของ Mac แล้วให้เจ้าของงานแก้ Security Group
+- **zsh:** `$ip:c` ถูกตีความเป็น modifier ให้ใช้ `${ip}` · `set -- $p` ไม่แยกคำ ให้รันผ่าน `bash <<'EOF'` · string ของ argument ไม่แยกคำ ให้ใช้ bash
+- **`pkill -f` / `pgrep -f`:** pattern จะไปเจอคำสั่ง ssh ของเราเอง ให้ใช้วงเล็บเหลี่ยม เช่น `'[/]gmtv[.]sh'`
+- ตอนรันใหม่บน cloud: บันทึก commit และ `git status` ใน log ทุกครั้ง (`cloud_worker.sh` และ `gmtv.sh` ทำแล้ว) และตั้ง watcher ดับเครื่องทุกครั้ง
+- ตัวอย่างคำสั่งรัน: ex3 = `bench.experiments exp3 --reps 15 --warmup 3 --sizes 100000 --batches 1 10 100 1000` (ดู `scripts/cloud_helpers/exp3fix.sh`) · Global-MT(v) = ดู `scripts/cloud_helpers/gmtv.sh`
+
+**สคริปต์ใน `scripts/cloud_helpers/`:**
+
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `gmtv.sh`, `exp3fix.sh` | งานที่รันบนเครื่อง cloud |
+| `watch_gmtv.sh`, `watch_exp3fix.sh` | รันบนเครื่อง cloud: ดับเครื่องเมื่องานจบ |
+| `watch_cloud.sh`, `watch_gmtv_local.sh`, `watch_exp3fix_local.sh` | รันบน Mac: เช็กทุก 3 นาที แล้ว rsync ผลกลับมาก่อนเครื่องดับ (IP ข้างในเป็นของรอบที่แล้ว ต้องแก้) |
+| `scan_in.py` | สแกนหา `x in <list>` ในลูป (หาลูปซ้อน) |
+| `prof_verify.py`, `ab_verify.py` | profile และ A/B การตรวจของผู้ใช้บน query จริง |
+
+---
+
+## 11. สิ่งที่เจ้าของงานชอบ / ไม่ชอบ
+
+- ตอบเป็นภาษาไทย อธิบายแบบเข้าใจง่าย ถ้าเจ้าของงานงงให้อธิบายด้วยภาพหรือขั้นตอน
+- ถ้าบอกว่า "คุยกันก่อน" หรือ "อย่าพึ่งทำ" ห้ามแก้อะไร
+- อยากให้เทียบแบบ**ยุติธรรม** และระวังลูปซ้อน
+- อยากให้เล่าด้านที่เราชนะ แต่ห้ามบิดตัวเลข: ต้องบอกช่วงที่แพ้ใน paper ด้วย
+- ส่งงานให้เพื่อนผ่าน PR พร้อมรายงานเสมอ
+- เคยมีหน้า Artifact สรุปผล (private): https://claude.ai/artifact/4zKSNXm3aQPU7xMnZjp7dg (เป็นของบัญชีเดิม บัญชีใหม่อาจเปิดไม่ได้)
+
+---
+
+## 12. ประวัติ PR (ย่อ)
+
+| PR | เรื่อง |
+|---|---|
+| #3 | step 1–8: โค้ดตาม paper (encoding, B+ tree, update protocol, Validator, bench) |
+| #4 | แผนการทดลองบน cloud, flag `AMTP_GAMMA_V` |
+| #5–#9 | ผลบน cloud, ย้ายสคริปต์ plot เก่า, `--variants` สำหรับ Global-MT(v) |
+| #10 | graph_op (กราฟเส้นเล่าเรื่อง main/limits) + ex3 หลังแก้ Validator |
+| #11 | Validator: ตรวจ next pointer ของ IMT จาก O(n·m) เป็น O((n+m) log n) |
+| #12 | commit `baselines/results/runs/` |
+| #13, #14 | split/merge θ = 128, 256 |
+| #15 | ย้ายผลแบบไม่มี v ไป `old/exp_no_v` |
+| #16 | ตรวจ Merkle เร็วขึ้น 1.2× (hash เท่าเดิม) + แก้ลูปซ้อนที่เหลือใน Validator |
