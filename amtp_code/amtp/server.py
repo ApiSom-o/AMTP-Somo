@@ -318,12 +318,21 @@ def _and_plan(state, b_q, postings):
     sel = {h: ({pid for pid, _ in p} if p is not None else set()) for h, p in postings.items()}
     size = {h: (state.post_count(bytes.fromhex(h)) if p is not None else 0) for h, p in postings.items()}
 
+    def data_key(s):
+        """Tie-break from the data only (PIDs and component sizes), never from the keyword keys h, which
+        are random per domain key: the same query on the same files picks the same full keyword."""
+        return (sorted(s[0]), sorted(sorted((pid, len(c)) for pid, c in postings[h]) for h in s[1]
+                                     if postings[h] is not None))
+
     def plan(node):
         if node[0] == "leaf":
             return sel[node[1]], {node[1]}
         subs = [plan(c) for c in node[1]]
         if node[0] == "AND":
-            return min(subs, key=lambda s: (len(s[0]), sum(size[h] for h in s[1])))
+            cost = [(len(s[0]), sum(size[h] for h in s[1])) for s in subs]
+            best = min(cost)
+            tied = [s for s, c in zip(subs, cost) if c == best]
+            return tied[0] if len(tied) == 1 else min(tied, key=data_key)
         return set().union(*(s[0] for s in subs)), set().union(*(s[1] for s in subs))
 
     _, full = plan(b_q)

@@ -88,6 +88,32 @@ def test_focus_rule():
     assert boolean.focus(c, known) is None
 
 
+def test_tie_break_does_not_depend_on_keyword_order():
+    """Two rarest keywords with the same partition and posting counts but different partitions: the full one
+    must not depend on their order in B_Q (which follows the random keyword keys h)."""
+    from amtp.server import _and_plan
+
+    class Counts:
+        def __init__(self, postings):
+            self.n = {bytes.fromhex(h): sum(len(c) for _, c in p) for h, p in postings.items() if p}
+
+        def post_count(self, hb):
+            return self.n[hb]
+
+    a, b, c = "aa" * 32, "bb" * 32, "cc" * 32
+    postings = {a: [("p2", [(b"x", 0)]), ("p5", [(b"y", 1)])],
+                b: [("p1", [(b"z", 0)]), ("p7", [(b"w", 2)])],
+                c: [(f"p{i}", [(b"v", i)]) for i in range(9)]}
+    state = Counts(postings)
+    picks = set()
+    for order in ([a, b, c], [b, a, c], [c, b, a]):
+        ast = ("AND", [("leaf", h) for h in order])
+        pruned, focus = _and_plan(state, ast, postings)
+        picks.add((frozenset(pruned), frozenset(focus)))
+    assert len(picks) == 1
+    assert picks == {(frozenset({a, c}), frozenset({"p1", "p7"}))}      # smallest PID list wins the tie
+
+
 @pytest.mark.skipif(os.environ.get("AMTP_AND_PRUNE", "0") == "1", reason="suite run with AMTP_AND_PRUNE=1")
 def test_default_is_off():
     assert not and_prune_on()
