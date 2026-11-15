@@ -42,13 +42,30 @@ job_env() {
     nov-update)      echo 'AMTP_GAMMA_V=0 SCHEMES=amtp|update' ;;
     nov-exp5)        echo 'AMTP_GAMMA_V=0 SCHEMES=amtp|exp5' ;;
     nov-sm64|nov-sm128|nov-sm256) echo "AMTP_GAMMA_V=0 SM_THETAS=${1#nov-sm}|splitmerge" ;;
+    # plan "fill" (15 Nov): AMTP only, placement fill, engine with batched Merkle updates; baselines are not re-run
+    fill-sm64|fill-sm128|fill-sm256)
+      echo "AMTP_PLACEMENT=fill SM_RUNS=1 SM_THETAS=${1#fill-sm} SM_VARIANTS=AMTP,Static-MT|splitmerge" ;;
+    fill-gmtv)       echo 'AMTP_PLACEMENT=fill SM_RUNS=1 SM_THETAS=64 SM_VARIANTS="Global-MT(v)" SM_TAG=_gmtv|splitmerge' ;;
+    fill-amtp)       echo 'AMTP_PLACEMENT=fill SCHEMES=amtp|search1 verify1 tamper xsearch xverify xdomains update exp5' ;;
     *) return 1 ;;
   esac
 }
 
 # worker -> jobs (estimated from the smoke run, REPS = 15; re-balance after the calibration run).
 # The six split / merge jobs (not shortened by REPS) go to six different machines.
+# PLAN=fill: the 5-machine re-run of AMTP (15 Nov), e.g.  PLAN=fill RUN_NAME=paper_fill bash scripts/cloud_worker.sh 1
 plan() {
+  if [ "${PLAN:-}" = fill ]; then
+    case $1 in
+      1) echo "fill-sm64" ;;
+      2) echo "fill-sm128" ;;
+      3) echo "fill-sm256" ;;
+      4) echo "fill-amtp" ;;
+      5) echo "fill-gmtv" ;;
+      *) return 1 ;;
+    esac
+    return 0
+  fi
   case $1 in
     1)  echo "tamper-amtp-a sm64" ;;
     2)  echo "tamper-amtp-b sm128" ;;
@@ -79,7 +96,7 @@ run_job() {
 
 case ${1:-} in
   list)
-    for w in 1 2 3 4 5 6 7 8 9 10; do echo "worker $w: $(plan $w)"; done
+    for w in 1 2 3 4 5 6 7 8 9 10; do p=$(plan $w) && echo "worker $w: $p"; done
     exit 0 ;;
   job)
     shift

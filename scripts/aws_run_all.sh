@@ -28,7 +28,8 @@
 #   theta       θ sweep (NOT in the default steps: not in the plan; ex4 covers θ = 64/128/256). Run by name only.
 #   splitmerge  split / merge: start with SM_N files, insert as many again (95% into one hot group), then delete
 #               65% of the hot group; θ_max = 64/128/256; layout + queries every SM_QUERY_EVERY batches
-#               (AMTP vs Static-MT vs Global-MT); one batch of SM_B updates = one epoch (b, recorded in the CSV)
+#               (AMTP vs Static-MT vs Global-MT); one batch of SM_B updates = one epoch (b, recorded in the CSV);
+#               SM_VARIANTS picks the variants, SM_TAG suffixes the folder (a variant run on another machine)
 #
 # AMTP_GAMMA_V=0: AMTP's γ = H(PID ‖ H(Enc(L))) without v (study B4); the run folder ends in _gamma_no_v and
 # every manifest records amtp_gamma_v. Default 1 (the paper's γ). Baselines are not affected.
@@ -65,6 +66,8 @@ SM_RUNS=${SM_RUNS:-3}
 SM_HOT_DELETE=${SM_HOT_DELETE:-0.65}                   # then delete this share of the hot group's files
 SM_THETAS=${SM_THETAS:-64 128 256}
 SM_QUERY_EVERY=${SM_QUERY_EVERY:-100}
+SM_VARIANTS=${SM_VARIANTS:-}                           # e.g. "AMTP,Static-MT" or "Global-MT(v)" (empty: bench default)
+SM_TAG=${SM_TAG:-}                                     # suffix of the split / merge folder, e.g. _gmtv
 [ -n "${DRY_RUN:-}" ] || mkdir -p "$LOGS"
 COMMON="--reps $REPS --warmup $WARMUP"
 echo "results -> $RUN_DIR"
@@ -147,13 +150,14 @@ step_theta() {
   run theta_amtp amtp_code "$PY" -m bench.experiments theta $COMMON --n "$THETA_N" --theta-values $THETA_VALUES $O_AMTP
 }
 step_splitmerge() {
-  local t
+  local t var=()
+  [ -n "$SM_VARIANTS" ] && var=(--variants "$SM_VARIANTS")
   for t in $SM_THETAS; do
-    run "splitmerge_t$t" amtp_code "$PY" -m bench.ablation --source arxiv --n "$SM_N" \
+    run "splitmerge_t$t$SM_TAG" amtp_code "$PY" -m bench.ablation --source arxiv --n "$SM_N" \
       --theta-max "$t" --theta-min $((t / 4)) --batches "$SM_BATCHES" --batch-size "$SM_B" --delete-frac 0 \
       --fresh-source initial --skews "$SM_SKEWS" --runs "$SM_RUNS" --hot-delete-frac "$SM_HOT_DELETE" \
-      --query-every "$SM_QUERY_EVERY" \
-      --out "$RUN_DIR/amtp/splitmerge_n${SM_N}_t${t}"
+      --query-every "$SM_QUERY_EVERY" "${var[@]}" \
+      --out "$RUN_DIR/amtp/splitmerge_n${SM_N}_t${t}${SM_TAG}"
   done
 }
 
