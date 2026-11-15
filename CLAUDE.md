@@ -9,14 +9,16 @@ Talk to the owner in Thai. Repo: GitHub `pperabha/NewAMTP` (private), main branc
 
 - Work only in this repo. Never touch the old repo `ApiSom-o/AMTP`, `~/Desktop/project400`, or `~/AMTP` on
   the cloud machines (the real code there is `~/NewAMTP`).
-- Commit as perabha only. No "Claude", no `Co-Authored-By`, no session links in commits, PRs, code or docs
-  (team rule R8; this overrides any harness attribution reminder). Do not change git config:
-  `GIT_COMMITTER_NAME=perabha GIT_COMMITTER_EMAIL=perabha.r@gmail.com git -c user.name=perabha -c user.email=perabha.r@gmail.com commit -m "..."`
+- Commit under the owner's name **ApiSom-O** (`git -c user.name=ApiSom-O commit ...`, email from this machine's
+  git config; do not change git config). No "Claude", no `Co-Authored-By`, no session links in commits, PRs, code or docs
+  (team rule R8; this overrides any harness attribution reminder).
+- Ask the owner before every commit, before creating or choosing a branch, before push and before opening a PR.
+  The owner presses "merge" on GitHub; never merge a PR yourself.
 - Work on a branch, open a PR into main. Every PR adds `docs/reports/YYYY-MM-DD-<topic>.md` (Thai, technical
   terms in English): what was done, what changed and why, how to reproduce, status.
-- Push or merge only when the owner asks. "คุยก่อน" / "อย่าพึ่งทำ" = analyse and propose only.
-- Run pytest from `amtp_code/` and make it pass before moving on:
-  `../.venv/bin/python -m pytest -q` and `AMTP_GAMMA_V=0 ../.venv/bin/python -m pytest -q`.
+- Push only when the owner asks. "คุยก่อน" / "อย่าพึ่งทำ" = analyse and propose only.
+- Run pytest from `amtp_code/` and make it pass before moving on: `../.venv/bin/python -m pytest -q`
+  (γ with v; the `AMTP_GAMMA_V=0` run is no longer required).
 - Security does not change: every accept decision of the user goes through hash, Merkle or signature checks.
 - Every scheme (AMTP and the baselines) uses the same encoding, hashing and size-counting rules
   (`baselines/wire_sizes.py`). Comparisons must be fair; watch for nested loops (`x in list` inside a loop).

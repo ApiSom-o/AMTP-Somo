@@ -6,6 +6,7 @@
   3. a changed Δ, Aff_i, R_new, placement, request or any part of π^upd is rejected
   4. random changes to π^upd are rejected or harmless (same root and Δ)
   5. the anchor starts from R^(0) and enforces predecessor and e* + 1
+1-4 run with both placement rules (amtp/variants.py: least, fill).
 """
 import copy
 import random
@@ -24,14 +25,15 @@ from amtp.validator import Invalid
 from amtp.variants import AdaptivePolicy, GlobalPolicy
 
 WORDS = [f"term{i}" for i in range(60)]
+PLACEMENTS = ["least", "fill"]
 
 
-def make_owner(policy=None, b=1):
+def make_owner(policy=None, b=1, placement="least"):
     anchor, server = RootAnchor(), CloudServer()
     keys = DomainKeys()
     server.register_query_key("A", keys.k_a)
     owner = DataOwner("A", "Owner", keys, AttributeAuthority(), anchor, server,
-                      ops_per_epoch=b, policy=policy or AdaptivePolicy(2, 2, 6))
+                      ops_per_epoch=b, policy=policy or AdaptivePolicy(2, 2, 6, placement))
     return owner
 
 
@@ -55,13 +57,14 @@ def random_requests(owner, rnd, n_ops, live, k):
     return reqs
 
 
+@pytest.mark.parametrize("placement", PLACEMENTS)
 @pytest.mark.parametrize("b", [1, 3, 10])
-def test_honest_transitions_are_validated_and_anchored(b):
+def test_honest_transitions_are_validated_and_anchored(b, placement):
     rnd = random.Random(b)
-    owner = make_owner(b=b)
+    owner = make_owner(b=b, placement=placement)
     eng = owner.server.engines["A"]
     live, k = [], [0]
-    for _ in range(60 // b + 20):
+    for _ in range(60 // b + 40):     # fill keeps partitions fuller: the first merge comes later (epoch 27 at b = 10)
         state = owner.update(random_requests(owner, rnd, b, live, k))
         assert owner.validator.R_D == eng.R_D == state.R_D == owner.anchor.latest("A")[1]
         assert owner.validator.epoch == eng.epoch == owner.anchor.latest("A")[0]
@@ -70,10 +73,11 @@ def test_honest_transitions_are_validated_and_anchored(b):
     assert set(owner.validator.loc) == set(eng.loc) and owner.validator.loc == eng.loc
 
 
-def test_b1_protocol_equals_plain_engine():
+@pytest.mark.parametrize("placement", PLACEMENTS)
+def test_b1_protocol_equals_plain_engine(placement):
     rnd = random.Random(5)
-    owner = make_owner(b=1)
-    plain = Engine("A", AdaptivePolicy(2, 2, 6))
+    owner = make_owner(b=1, placement=placement)
+    plain = Engine("A", AdaptivePolicy(2, 2, 6, placement))
     live, k = [], [0]
     for _ in range(80):
         req = random_requests(owner, rnd, 1, live, k)[0]
@@ -131,10 +135,10 @@ TAMPERS = {
 }
 
 
-def _fresh_case(seed):
+def _fresh_case(seed, placement="least"):
     """An owner whose validator is exactly at a proposal's predecessor."""
     rnd = random.Random(seed)
-    owner = make_owner(b=3)
+    owner = make_owner(b=3, placement=placement)
     live, k = [], [0]
     for _ in range(rnd.randint(3, 25)):
         owner.update(random_requests(owner, rnd, 3, live, k))
@@ -160,10 +164,11 @@ def _set(obj, path, value):
     obj[path[-1]] = value
 
 
+@pytest.mark.parametrize("placement", PLACEMENTS)
 @pytest.mark.parametrize("seed", range(6))
-def test_targeted_tampers_on_fresh_proposals(seed):
+def test_targeted_tampers_on_fresh_proposals(seed, placement):
     for name, fn in TAMPERS.items():
-        owner, prop, reqs = _fresh_case(seed)
+        owner, prop, reqs = _fresh_case(seed, placement)
         p, r = copy.deepcopy(prop), copy.deepcopy(reqs)
         try:
             fn(p, r)
@@ -174,10 +179,11 @@ def test_targeted_tampers_on_fresh_proposals(seed):
         owner.validator.check(prop, reqs)               # the honest proposal still passes
 
 
+@pytest.mark.parametrize("placement", PLACEMENTS)
 @pytest.mark.parametrize("seed", range(4))
-def test_random_changes_to_evidence_are_rejected_or_harmless(seed):
+def test_random_changes_to_evidence_are_rejected_or_harmless(seed, placement):
     rnd = random.Random(100 + seed)
-    owner, prop, reqs = _fresh_case(seed)
+    owner, prop, reqs = _fresh_case(seed, placement)
     honest_sig = owner.validator.check(prop, reqs)
     assert honest_sig
     for _ in range(150):

@@ -40,7 +40,7 @@ from amtp.engine import Engine                                    # noqa: E402
 from amtp.index import set_gamma_v                                # noqa: E402
 from amtp.server import build_response                            # noqa: E402
 from amtp.user import DataUser                                    # noqa: E402
-from amtp.variants import AdaptivePolicy, GlobalPolicy, StaticPolicy   # noqa: E402
+from amtp.variants import PLACEMENTS, AdaptivePolicy, GlobalPolicy, StaticPolicy   # noqa: E402
 from bench.workload import REPO_ROOT                             # noqa: E402
 
 sys.path.insert(0, os.path.join(REPO_ROOT, "baselines"))
@@ -58,12 +58,12 @@ def build(variant, docs, a):
     elif variant == "Global-MT(v)":
         eng = Engine(DOMAIN, GlobalPolicy(a.buckets, versioned=True))
     else:
-        eng = Engine(DOMAIN, AdaptivePolicy(a.buckets, a.theta_min, a.theta_max))
+        eng = Engine(DOMAIN, AdaptivePolicy(a.buckets, a.theta_min, a.theta_max, a.placement))
     for d in docs:
         eng.insert(d.cid, d.keys, d.bucket)
     eng.commit()
     if variant == "Static-MT":                       # same start as AMTP, then frozen
-        eng.policy = StaticPolicy(a.buckets, a.theta_min, a.theta_max)
+        eng.policy = StaticPolicy(a.buckets, a.theta_min, a.theta_max, a.placement)
     return eng
 
 
@@ -108,6 +108,9 @@ def main():
     ap.add_argument("--buckets", type=int, default=16, help="workload groups (e.g. mailbox owners)")
     ap.add_argument("--theta-max", type=int, default=256)
     ap.add_argument("--theta-min", type=int, default=64)
+    ap.add_argument("--placement", choices=PLACEMENTS, default=os.environ.get("AMTP_PLACEMENT", "least"),
+                    help="where a new file goes (amtp/variants.py): least = least occupied partition of its bucket, "
+                         "fill = fullest partition below θ_max (same rule for AMTP and Static-MT); default from AMTP_PLACEMENT")
     ap.add_argument("--batches", type=int, default=20)
     ap.add_argument("--batch-size", type=int, default=100)
     ap.add_argument("--skews", default="0,0.5,0.8,0.95",
@@ -135,6 +138,7 @@ def main():
     ap.add_argument("--gamma-no-v", action="store_true",
                     help="γ = H(PID ‖ H(Enc(L))) without the partition version v (study B4; same as AMTP_GAMMA_V=0)")
     a = ap.parse_args()
+    os.environ["AMTP_PLACEMENT"] = a.placement           # recorded in every manifest
     if a.gamma_no_v or os.environ.get("AMTP_GAMMA_V", "1") == "0":
         os.environ["AMTP_GAMMA_V"] = "0"                  # recorded in every manifest
         set_gamma_v(False)
@@ -147,7 +151,7 @@ def main():
             ap.error(f"--variants: unknown {unknown}; choose from {', '.join(VARIANTS)}")
     skews = [float(s) for s in a.skews.split(",")]
     os.makedirs(a.out, exist_ok=True)
-    manifest = {"args": vars(a), "b": a.batch_size, "gamma_v": os.environ.get("AMTP_GAMMA_V", "1") != "0",
+    manifest = {"args": vars(a), "b": a.batch_size, "placement": a.placement, "gamma_v": os.environ.get("AMTP_GAMMA_V", "1") != "0",
                 "python": sys.version, "platform": platform.platform(),
                 "machine": platform.machine(), "processor": platform.processor(),
                 "cpus": os.cpu_count(), "started": time.strftime("%Y-%m-%d %H:%M:%S")}

@@ -434,7 +434,8 @@ def write_manifest(csv_path):
             "written": time.strftime("%Y-%m-%d %H:%M:%S %z"), "git_commit": git("rev-parse", "HEAD"),
             "git_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
             "dataset": DATASET_TAG, "machine": machine_info(),
-            "amtp_gamma_v": os.environ.get("AMTP_GAMMA_V", "1") != "0"}   # AMTP: γ with the version v (B4 study)
+            "amtp_gamma_v": os.environ.get("AMTP_GAMMA_V", "1") != "0",   # AMTP: γ with the version v (B4 study)
+            "amtp_placement": os.environ.get("AMTP_PLACEMENT", "least")}   # AMTP: placement rule (amtp/variants.py)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(info, f, indent=1, ensure_ascii=False)
     return out

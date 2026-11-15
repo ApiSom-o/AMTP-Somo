@@ -47,13 +47,13 @@ def test_gamma_without_v_ignores_the_version_but_binds_pid_and_postings(no_v):
 
 @pytest.mark.parametrize("b", [1, 3, 10])
 def test_honest_histories_validate_without_v(no_v, b):
-    up.test_honest_transitions_are_validated_and_anchored(b)
+    up.test_honest_transitions_are_validated_and_anchored(b, "least")
     owner, *_ = ab.history(b, b=b, rounds=30)
     ab.assert_finalized(owner)                            # incremental R_D == full rebuild
 
 
 def test_plain_engine_and_protocol_agree_without_v(no_v):
-    up.test_b1_protocol_equals_plain_engine()
+    up.test_b1_protocol_equals_plain_engine("least")
 
 
 def _keys_refreshed(monkeypatch, on, seed=7, rounds=40):
@@ -84,8 +84,8 @@ def test_without_v_fewer_gammas_are_rehashed(monkeypatch):
 
 @pytest.mark.parametrize("seed", range(3))
 def test_tampered_proposals_are_rejected_without_v(no_v, seed):
-    up.test_targeted_tampers_on_fresh_proposals(seed)
-    up.test_random_changes_to_evidence_are_rejected_or_harmless(seed)
+    up.test_targeted_tampers_on_fresh_proposals(seed, "least")
+    up.test_random_changes_to_evidence_are_rejected_or_harmless(seed, "least")
 
 
 @pytest.mark.parametrize("mode", sorted(set(adv.ATTACKS) - {"honest"}))

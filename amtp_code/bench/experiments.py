@@ -76,7 +76,7 @@ from amtp.validator import Validator                             # noqa: E402
 from amtp.adversary import flip_one_byte                         # noqa: E402
 from amtp.server import CloudServer, build_response              # noqa: E402
 from amtp.user import DataUser, Reject                           # noqa: E402
-from amtp.variants import AdaptivePolicy, StaticPolicy           # noqa: E402
+from amtp.variants import PLACEMENTS, AdaptivePolicy, StaticPolicy   # noqa: E402
 from bench.workload import REPO_ROOT, _primary_categories, arxiv_loader   # noqa: E402
 
 sys.path.insert(0, os.path.join(REPO_ROOT, "baselines"))
@@ -176,7 +176,7 @@ class Domain:
         self.signer = Signer()
         server.register_query_key(name, corpus.keys_for(name).k_a)
         self.anchor, self.server = anchor, server
-        self.eng = Engine(name, policy or AdaptivePolicy(a.buckets, a.theta_min, a.theta_max))
+        self.eng = Engine(name, policy or AdaptivePolicy(a.buckets, a.theta_min, a.theta_max, a.placement))
         anchor.register_domain(name, self.signer.public, self.eng.R_D)      # R^(0)
         self.cids = []
         self.doc_ids = [d.doc_id for d in docs]
@@ -579,7 +579,7 @@ def suite_exp3(a):
         src = corpus.D.sample(n, a.domains, a.data)
         dom, _, lay = setup("D", corpus, src, a)
         eng = dom.eng
-        proto = Protocol(dom, StaticPolicy(a.buckets, a.theta_min, a.theta_max))
+        proto = Protocol(dom, StaticPolicy(a.buckets, a.theta_min, a.theta_max, a.placement))
         epoch = proto.epoch
         cursor = 0
 
@@ -896,7 +896,7 @@ def suite_theta(a):
                               ("query_gen_ms", "server_total_ms", "verify_total_ms", "end_to_end_ms")})
             for k in info_sum:
                 info_sum[k].append(info[k])
-        proto = Protocol(dom, StaticPolicy(a.buckets, a.theta_min, a.theta_max))   # frozen, as in exp3
+        proto = Protocol(dom, StaticPolicy(a.buckets, a.theta_min, a.theta_max, a.placement))   # frozen, as in exp3
         upd = {}
         for b in (1, 100):
             dom.eng.ops_per_epoch = b
@@ -954,6 +954,9 @@ def main():
     ap.add_argument("--buckets", type=int, default=16, help="placement groups (arXiv primary categories)")
     ap.add_argument("--theta-max", type=int, default=64)                 # docs/THETA_CHOICE.md
     ap.add_argument("--theta-min", type=int, default=16)
+    ap.add_argument("--placement", choices=PLACEMENTS, default=os.environ.get("AMTP_PLACEMENT", "least"),
+                    help="where a new file goes (amtp/variants.py): least = least occupied partition of its bucket, "
+                         "fill = fullest partition below θ_max (the same rule in every suite); default from AMTP_PLACEMENT")
     ap.add_argument("--theta-values", type=int, nargs="+", default=[64, 128, 256, 512, 1024],
                     help="θ_max values for the theta sweep (θ_min = θ_max / 4)")
     D = arxiv_loader()
@@ -973,6 +976,7 @@ def main():
     ap.add_argument("--gamma-no-v", action="store_true",
                     help="γ = H(PID ‖ H(Enc(L))) without the partition version v (study B4; same as AMTP_GAMMA_V=0)")
     a = ap.parse_args()
+    os.environ["AMTP_PLACEMENT"] = a.placement           # recorded in every manifest
     if a.gamma_no_v or os.environ.get("AMTP_GAMMA_V", "1") == "0":
         os.environ["AMTP_GAMMA_V"] = "0"                  # recorded in every manifest
         set_gamma_v(False)

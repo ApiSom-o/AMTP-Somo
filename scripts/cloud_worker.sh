@@ -11,6 +11,9 @@
 #   paper_v     AMTP's γ with the version v (the paper): every experiment, every scheme
 #   paper_nov   AMTP's γ without v (study B4, AMTP_GAMMA_V=0): only the AMTP update experiments
 # Every machine must be on the same commit. Results: baselines/results/runs/<run>/ (logs in <run>/logs/).
+# Placement rule of AMTP / Static-MT (amtp/variants.py): AMTP_PLACEMENT=fill|least (default least), read by
+# bench.experiments and bench.ablation and recorded in every manifest, e.g.
+#   AMTP_PLACEMENT=fill RUN_NAME=paper_fill bash scripts/cloud_worker.sh 3
 set -u
 cd "$(dirname "$0")/.."
 NAME=${RUN_NAME:-paper}
@@ -86,7 +89,7 @@ case ${1:-} in
     read -r -a JOBS <<< "$(plan "$1")" || true
     [ ${#JOBS[@]} -gt 0 ] || { echo "no worker $1 (1..10)"; exit 2; } ;;
   *)
-    sed -n '2,14p' "$0"
+    sed -n '2,16p' "$0"
     exit 2 ;;
 esac
 

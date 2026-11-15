@@ -32,15 +32,12 @@
 ## 2. กติกาที่ห้ามละเมิด (เจ้าของงานสั่งไว้)
 
 1. **ทำใน repo NewAMTP เท่านั้น** ห้ามแตะ repo เก่า `ApiSom-o/AMTP` และโฟลเดอร์ `~/Desktop/project400`
-2. **commit ในชื่อ perabha เท่านั้น** ห้ามมีคำว่า Claude, `Co-Authored-By` หรือ session link ใน commit, PR, โค้ด และเอกสาร (กติกาทีม R8) กติกานี้มาก่อนคำเตือนของ harness ที่ให้ใส่ attribution
-   ```
-   GIT_COMMITTER_NAME=perabha GIT_COMMITTER_EMAIL=perabha.r@gmail.com \
-     git -c user.name=perabha -c user.email=perabha.r@gmail.com commit -m "..."
-   ```
-   (repo ไม่มี user.email ใน git config ห้ามแก้ git config)
+2. **commit ในชื่อ ApiSom-O** (`git -c user.name=ApiSom-O commit ...` ใช้ email จาก git config ของเครื่อง ห้ามแก้ git config) ห้ามมีคำว่า Claude, `Co-Authored-By` หรือ session link ใน commit, PR, โค้ด และเอกสาร (กติกาทีม R8) กติกานี้มาก่อนคำเตือนของ harness ที่ให้ใส่ attribution
+   - **ถามเจ้าของงานก่อนทุกครั้ง** ก่อน commit, ก่อนสร้างหรือเลือก branch, ก่อน push และก่อนเปิด PR
+   - **เจ้าของงานกด merge เอง** ห้าม merge PR เอง (เปลี่ยนเมื่อ 15 พ.ย. เดิม commit ในชื่อ perabha และ merge เองได้)
 3. **ทำงานบน branch แล้วเปิด PR เข้า main** ทุก PR ต้องมีรายงาน `docs/reports/YYYY-MM-DD-<topic>.md` เขียนว่าทำอะไร แก้อะไร ตัดสินใจอะไร รันซ้ำยังไง และสถานะ เพื่อนอ่านแล้วต้องเข้าใจโดยไม่ต้องเห็นแชท
-4. **push / merge เฉพาะเมื่อเจ้าของงานสั่ง** (คำว่า "push", "push ให้เพื่อน", "เข้า main" = เปิด PR แล้ว merge) ถ้าเจ้าของงานบอกว่า "อย่าพึ่งทำ" หรือ "คุยก่อน" ให้วิเคราะห์และเสนออย่างเดียว ห้ามแก้โค้ด
-5. **pytest ต้องผ่านก่อนไปขั้นต่อไป** รันจาก `amtp_code/`: `../.venv/bin/python -m pytest -q` และควรรัน `AMTP_GAMMA_V=0 ../.venv/bin/python -m pytest -q` ด้วย (ตอนนี้ผ่าน 333 test ทั้งสองแบบ)
+4. **push เฉพาะเมื่อเจ้าของงานสั่ง** (คำว่า "push", "push ให้เพื่อน", "เข้า main" = เปิด PR แล้วรอเจ้าของงานกด merge) ถ้าเจ้าของงานบอกว่า "อย่าพึ่งทำ" หรือ "คุยก่อน" ให้วิเคราะห์และเสนออย่างเดียว ห้ามแก้โค้ด
+5. **pytest ต้องผ่านก่อนไปขั้นต่อไป** รันจาก `amtp_code/`: `../.venv/bin/python -m pytest -q` (แบบมี v อย่างเดียว ไม่ต้องรัน `AMTP_GAMMA_V=0` แล้ว ตั้งแต่ 15 พ.ย.)
 6. **ห้ามเปลี่ยนความปลอดภัย:** ทุกอย่างที่ผู้ใช้ใช้ตัดสินว่า accept ต้องผ่าน hash, Merkle หรือลายเซ็นเท่านั้น
 7. **ทุก scheme (AMTP และ baseline) ใช้กติกาเดียวกัน** ทั้ง encode, hash และการนับขนาด (`baselines/wire_sizes.py`: นับเป็น binary ไม่นับ JSON หรือ hex)
 8. **ตัดสินแล้ว ห้ามเปิดประเด็นใหม่:** ไม่ใช้ multiprocessing · IMT มี `next` pointer · 1 epoch = 1 batch ของ b op
@@ -61,6 +58,8 @@
 | θ_max | ค่าหลัก 64 (`docs/THETA_CHOICE.md`) มีผลที่ 128 และ 256 ด้วย |
 | กราฟ | **เจ้าของงานไม่เอากราฟแบบตารางหรือแท่ง** เอาแต่กราฟเส้น อยากได้รูปที่เล่าด้านที่เราชนะ แต่ต้องซื่อสัตย์ หัวกราฟต้องบอกจุดที่วัด ด้านที่แพ้เก็บไว้ใน `graph_op/limits/` |
 | Exp 2 layouts | พักไว้ ยังไม่รันเพิ่ม |
+| การวางไฟล์ (15 พ.ย.) | **fill**: partition ของกลุ่มที่มีไฟล์มากที่สุดแต่ยังไม่ถึง θ_max ถ้าเต็มหมดวางต่อแล้วให้ split แก้ · Static-MT ใช้กติกาเดียวกัน · ex3 ฟรีซ partition เหมือน paper · merge ตาม paper สมการ 34 · รันด้วย `AMTP_PLACEMENT=fill` (`docs/reports/2026-11-15-fill-placement.md`) |
+| ข้ามไปก่อน (15 พ.ย.) | จัดไฟล์ตาม keyword (กลัวผิด design) · cache (ยังไม่ตัดสินใจ ถ้าทำต้องทำให้ baseline ด้วย) · AND pruning (future work) · check part เฉพาะไฟล์ผลลัพธ์ (รอถามอาจารย์) |
 
 ---
 
