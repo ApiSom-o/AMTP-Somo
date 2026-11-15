@@ -256,15 +256,19 @@ class Engine:
 
         if self._new or self._retired:
             self._rebuild_part_tree()
-        else:
-            for pid in self._modified:
-                self.part_tree.set_leaf(self.part_pos[pid], self._A(pid), self._undo)
+        elif self._modified:                       # every changed inner node of the domain tree once
+            self.part_tree.set_leaves({self.part_pos[pid]: self._A(pid) for pid in self._modified}, self._undo)
 
         dirty_pids = {}
+        sel_of = {}                                # h -> Sel(h): ONE Search Tree lookup per dirty key
         for h, pid in self._dirty_comp:
             self._dirty_keys.add(h)
             dirty_pids.setdefault(h, set()).add(pid)
-            entries = self.comp.get(h, {}).get(pid)
+            if h in sel_of:
+                sel = sel_of[h]
+            else:
+                sel = sel_of[h] = self.comp.get(h)
+            entries = sel.get(pid) if sel else None
             if entries and pid in self.parts:
                 comp = sorted(entries.items(), key=lambda e: e[1])
                 g = self.gam.get(h)
@@ -277,10 +281,11 @@ class Engine:
 
         added, removed = [], []
         for h in self._dirty_keys:
-            if self.comp.get(h):
+            sel = sel_of[h] if h in sel_of else self.comp.get(h)
+            if sel:
                 if h not in self.rho:
                     added.append(h)
-                self._set(self.rho, h, rho(h, len(self.comp[h]), self._post_root(h, dirty_pids[h])))
+                self._set(self.rho, h, rho(h, len(sel), self._post_root(h, dirty_pids[h], sel)))
             else:
                 self._comp_remove(h)               # the key left the index: remove it once
                 for d in (self.gam, self.post):
@@ -415,16 +420,17 @@ class Engine:
         if pid not in self._new:
             self._modified.add(pid)
 
-    def _post_root(self, h, changed):
+    def _post_root(self, h, changed, sel=None):
         """R^post over γ in PID order. If the keyword still lives in the same
-        partitions, only the changed γ paths are recomputed (dirty-path update)."""
-        sel = self.comp[h]
+        partitions, only the changed γ paths are recomputed (dirty-path update).
+        sel: Sel(h) if the caller already looked it up in the Search Tree."""
+        if sel is None:
+            sel = self.comp[h]
         cached = self.post.get(h)
         if cached and len(cached[0]) == len(sel) and all(p in cached[0] for p in sel):
             order, tree = cached
-            for pid in changed:
-                if pid in order:
-                    tree.set_leaf(order[pid], self.gam[h][pid], self._undo)
+            g = self.gam[h]
+            tree.set_leaves({order[pid]: g[pid] for pid in changed if pid in order}, self._undo)
             return tree.root
         pids = sorted(sel)
         tree = MerkleTree([self.gam[h][p] for p in pids])
@@ -486,12 +492,16 @@ class Engine:
                 appended.append(pos)
             self._set(self.imt_pos, h, pos)
             dirty.add(self.imt_pos[prev])
-        for pos in sorted(dirty - set(appended)):
-            self.imt.set_leaf(pos, self._imt_value(self.imt_layout[pos]), self._undo)
-        for pos in appended:
-            if not self.imt.try_append(self._imt_value(self.imt_layout[pos]), self._undo):
-                self._attr(self, "imt", MerkleTree([self._imt_value(h) for h in self.imt_layout]))   # capacity doubled
-                break
+        # One pass over the tree: every changed inner node is hashed once (not once per changed key).
+        # New keys fill the padding slots imt.n, imt.n + 1, ...; if they do not fit, the tree is rebuilt
+        # with a doubled capacity from the current leaves (which already hold every change of this epoch).
+        n_new = self.imt.n + len(appended)
+        if n_new > len(self.imt.levels[0]):
+            self._attr(self, "imt", MerkleTree([self._imt_value(h) for h in self.imt_layout]))
+            return
+        layout = self.imt_layout
+        self.imt.set_leaves({pos: self._imt_value(layout[pos]) for pos in dirty | set(appended)},
+                            self._undo, n_new if appended else None)
 
     def _reset_dirty(self):
         self._modified, self._new, self._retired = set(), set(), set()

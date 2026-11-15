@@ -83,6 +83,42 @@ class MerkleTree:
             level[i] = old
             i //= 2
 
+    def set_leaves(self, values: dict, undo: list = None, n: int = None):
+        """Replace the leaves {position: value} and recompute every changed inner node ONCE, level by level.
+        The tree is exactly the one that set_leaf on each position gives, but k leaves cost the number of
+        distinct ancestors instead of k x depth hashes (the root is hashed once, not k times).
+        n: new number of real leaves, when some positions fill padding slots (the caller checks the capacity).
+        undo: if given, ONE action that restores every touched node (and n) is appended to it."""
+        if not values and n is None:
+            return
+        levels = self.levels
+        touched = [sorted(values)]                      # positions touched on each level
+        for _ in range(1, len(levels)):
+            prev, ups = touched[-1], []
+            for i in prev:                              # prev is sorted: equal parents are neighbours
+                p = i >> 1
+                if not ups or ups[-1] != p:
+                    ups.append(p)
+            touched.append(ups)
+        if undo is not None:
+            saved = [[level[i] for i in idx] for level, idx in zip(levels, touched)]
+            undo.append(lambda n_old=self.n: self._restore_nodes(touched, saved, n_old))
+        leaves = levels[0]
+        for i, v in values.items():
+            leaves[i] = leaf_hash(v)
+        for d in range(1, len(levels)):
+            below, level = levels[d - 1], levels[d]
+            for i in touched[d]:
+                level[i] = node_hash(below[2 * i], below[2 * i + 1])
+        if n is not None:
+            self.n = n
+
+    def _restore_nodes(self, touched: list, saved: list, n_old: int):
+        for level, idx, old in zip(self.levels, touched, saved):
+            for i, h in zip(idx, old):
+                level[i] = h
+        self.n = n_old
+
     def try_append(self, value: bytes, undo: list = None) -> bool:
         """Fill the next padding slot in place. False if the tree is full
         (the caller then rebuilds with a doubled size)."""
