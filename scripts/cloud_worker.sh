@@ -50,6 +50,11 @@ job_env() {
     # plan "prune" (16 Nov): AMTP query suites with every query flag on (AND pruning, result-only partition check,
     # greedy planner), placement fill; update code is unchanged since "fill", so ex3 / ex4 and the baselines are not re-run
     prune-amtp)      echo 'AMTP_PLACEMENT=fill AMTP_AND_PRUNE=1 AMTP_PART_RESULTS=1 AMTP_AND_GREEDY=1 SCHEMES=amtp|search1 verify1 tamper xsearch xverify xdomains exp5' ;;
+    # ex4 again with the query flags on for every variant (same server / user code): updates are unchanged since
+    # "fill", the per-batch queries change
+    prune-sm64|prune-sm128|prune-sm256)
+      echo "AMTP_PLACEMENT=fill AMTP_AND_PRUNE=1 AMTP_PART_RESULTS=1 AMTP_AND_GREEDY=1 SM_RUNS=1 SM_THETAS=${1#prune-sm} SM_VARIANTS=AMTP,Static-MT|splitmerge" ;;
+    prune-gmtv)      echo 'AMTP_PLACEMENT=fill AMTP_AND_PRUNE=1 AMTP_PART_RESULTS=1 AMTP_AND_GREEDY=1 SM_RUNS=1 SM_THETAS=64 SM_VARIANTS="Global-MT(v)" SM_TAG=_gmtv|splitmerge' ;;
     *) return 1 ;;
   esac
 }
@@ -57,10 +62,17 @@ job_env() {
 # worker -> jobs (estimated from the smoke run, REPS = 15; re-balance after the calibration run).
 # The six split / merge jobs (not shortened by REPS) go to six different machines.
 # PLAN=fill: the 5-machine re-run of AMTP (15 Nov), e.g.  PLAN=fill RUN_NAME=paper_fill bash scripts/cloud_worker.sh 1
-# PLAN=prune: 1 machine, AMTP query suites with every query flag on, e.g.  PLAN=prune RUN_NAME=paper_prune bash scripts/cloud_worker.sh 1
+# PLAN=prune: 5 machines, every query flag on: 1 = AMTP query suites, 2-4 = ex4 AMTP + Static-MT θ 64/128/256, 5 = Global-MT(v), e.g.  PLAN=prune RUN_NAME=paper_prune bash scripts/cloud_worker.sh 1
 plan() {
   if [ "${PLAN:-}" = prune ]; then
-    case $1 in 1) echo "prune-amtp" ;; *) return 1 ;; esac
+    case $1 in
+      1) echo "prune-amtp" ;;
+      2) echo "prune-sm64" ;;
+      3) echo "prune-sm128" ;;
+      4) echo "prune-sm256" ;;
+      5) echo "prune-gmtv" ;;
+      *) return 1 ;;
+    esac
     return 0
   fi
   if [ "${PLAN:-}" = fill ]; then
