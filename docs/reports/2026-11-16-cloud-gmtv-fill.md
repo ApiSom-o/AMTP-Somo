@@ -56,7 +56,7 @@
 
 ## ยังไม่ครบ
 
-- **Global-MT(v) ของรอบ fill (worker7):** ยังไม่ได้ดึงผลเข้า repo กราฟ split/merge ของรอบ fill จึงมีแค่ AMTP กับ Static-MT
+- **Global-MT(v) ของรอบ fill (worker7) — เพิ่ม 16 พ.ย. 10:30:** Global-MT(v) ของรอบ fill (เครื่อง amtp-worker7, commit `869cf73`, placement fill, engine ใหม่) ครบ 1,674 batch แล้ว อยู่ที่ `data/fill/splitmerge_n100000_t64_gmtv/` (ผลดิบ `runs/cloud/fill_w5/`) และอยู่ในกราฟ `graphs/fill/` แล้ว: update median ทั้ง stream AMTP 1.1 s · Static-MT 14.8 s (13.4×) · Global-MT(v) 28.5 s (**25.7×**) · query (server + verify, median ทุกจุดวัด) AMTP 51.7 · Static-MT 46.1 · Global-MT(v) 30.0 ms → AMTP คุ้มกว่า Global-MT(v) จนกว่าจะมี query เกิน ~1,260 ครั้งต่อ epoch (Static-MT ~2,450) · ตรวจแล้ว: manifest `git_dirty: false`, `placement: fill`, `variants: Global-MT(v)` และใช้ seed / workload เดียวกับ AMTP
 - **เมื่อดึงผลแล้ว:** ให้วางเฉพาะแถว Global-MT(v) เป็น `new_new/data/fill_global_mt_v_t64/` ลิงก์เข้า run ของ fill เป็น `amtp/splitmerge_n100000_t64_gmtv` แล้วรันคำสั่งด้านล่างซ้ำ
 
 ## วิธีทำกราฟซ้ำ
