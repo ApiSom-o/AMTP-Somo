@@ -11,6 +11,21 @@
    - **ยังรันอยู่:** xdomains และ exp5 คาดว่าเสร็จ ~00:00 จะตามมาใน PR ถัดไป (log ของ xdomains ที่ยังไม่จบไม่ได้ใส่ใน PR นี้)
 2. **กราฟ:** `baselines/results/search_split/graphs/` (Search 1.1, 1.2, 2.1 ทั้ง 4 รูปแบบ, AMTP แยกเวลา search กับ search + proof) และ `figure_points.csv` ใช้แบบ partition ก่อน (`server_search_pf_fetch`) ตามที่ตกลงไว้ใน `2026-11-16-summary-all-changes.md`
 
+3. **กราฟ ex4 รอบ prune:** plot ใหม่ใน `baselines/results/new_purn/graphs/paper/ex4_split_merge/` (θ 64 / 128 / 256, AMTP + Static-MT จาก `prune_w2..w4`) และ `story/main/` เพิ่ม 2 รูป · Global-MT(v) ยังรอเครื่อง 5 · `new_purn/README.md` อัปเดตแล้ว
+   - update: AMTP 1.05 / 1.20 / 1.48 s ต่อ batch เทียบ Static-MT 13.5 / 13.6 / 14.4 s (**ชนะทุก θ**)
+   - query: AMTP ตรวจช้ากว่า Static-MT เล็กน้อยทุก θ (ต้องเขียนใน paper)
+
+## ทั้งหมดอยู่ที่ไหน
+
+| อะไร | โฟลเดอร์ |
+|---|---|
+| กราฟ search อย่างเดียว (partition ก่อน) | `baselines/results/search_split/graphs/` |
+| กราฟรอบ prune ทั้งหมด (ex1–ex5) | `baselines/results/new_purn/graphs/paper/` และ `story/` |
+| ผลดิบ search อย่างเดียว | `baselines/results/runs/cloud/split_w1/paper_split/amtp/` |
+| ผลดิบรอบ prune | `baselines/results/runs/cloud/prune_w1/` (query) · `prune_w2..w4/` (ex4) |
+| baseline (ไม่รันใหม่) | `baselines/results/new_amtp_result/gamma_with_v/{secollab,chen,du}/` |
+| ex3 update (รอบ fill) | `baselines/results/new_new/data/fill/` |
+
 ## ผล search อย่างเดียว (แบบ partition ก่อน, cloud, ms)
 
 ### Search 1.1: N = 100k, AND, vary kQ
