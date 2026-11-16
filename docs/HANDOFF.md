@@ -65,7 +65,8 @@
 | ข้ามไปก่อน (15 พ.ย.) | จัดไฟล์ตาม keyword (กลัวผิด design) · cache (เจ้าของงานตัดสินใจไม่ทำ 16 พ.ย.) |
 | **placement หลักของ paper (16 พ.ย.)** | **fill** เป็นวิธีหลัก · ค่าเริ่มต้นของ `bench.experiments` และ `bench.ablation` เปลี่ยนจาก least เป็น fill แล้ว (`AMTP_PLACEMENT=least` ยังเลือกได้) · class `AdaptivePolicy` ยังมีค่าเริ่มต้น least เพื่อให้ test และ demo เดิมไม่เปลี่ยน · ผล Mac ใน `mac_and_prune/` ใช้ least ใช้เทียบผลของ flag ได้ แต่ไม่ใช่ตัวเลข paper (`docs/reports/2026-11-16-fill-default.md`) |
 | query flags (16 พ.ย., อยู่ใน main แล้ว) | `--and-prune`, `--part-results`, `--and-greedy` (หรือ env `AMTP_AND_PRUNE` / `AMTP_PART_RESULTS` / `AMTP_AND_GREEDY` = 1) ค่าเริ่มต้นปิด · ผลบน Mac และข้อจำกัด: `docs/reports/2026-11-16-and-pruning.md` · ต้องแก้ paper (ASPA eq. 52–57) และให้อาจารย์อนุมัติก่อนใช้ |
-| แผน cloud "prune" (16 พ.ย.) | `PLAN=prune RUN_NAME=paper_prune bash scripts/cloud_worker.sh <1..5>` · 5 เครื่อง เปิดทุก query flag, placement fill, reps 15: 1 = AMTP search1, verify1, tamper, xsearch, xverify, xdomains, exp5 · 2–4 = ex4 AMTP + Static-MT θ 64 / 128 / 256 · 5 = ex4 Global-MT(v) θ 64 · ex3 และ baseline ไม่รันใหม่ (โค้ด update และ baseline ไม่เปลี่ยน) · ~13 ชม. · ยังไม่ได้รัน |
+| แผน cloud "prune" (16 พ.ย.) | `PLAN=prune RUN_NAME=paper_prune bash scripts/cloud_worker.sh <1..5>` · 5 เครื่อง เปิดทุก query flag, placement fill, reps 15: 1 = AMTP search1, verify1, tamper, xsearch, xverify, xdomains, exp5 · 2–4 = ex4 AMTP + Static-MT θ 64 / 128 / 256 · 5 = ex4 Global-MT(v) θ 64 · ex3 และ baseline ไม่รันใหม่ (โค้ด update และ baseline ไม่เปลี่ยน) · เริ่มรัน 16 พ.ย. ~11:00 ที่ `767289c` |
+| สถานะรอบ prune (16 พ.ย. 18:00) | **เครื่อง 1 เสร็จแล้ว** ผลอยู่ที่ `runs/cloud/prune_w1/` กราฟอยู่ที่ `baselines/results/new_purn/graphs/` (ex1, ex2, ex5 ใช้ผลรอบนี้ ex3 ใช้ผลรอบ fill) · AND kQ 16 end-to-end 85.7 → 6.5 ms (SE-COLLAB 10.5) · OR และ keyword เดียวไม่ดีขึ้น และ server ช้าลง 4–13% (วัดบน Mac ยืนยันแล้ว) · update ex5 ช้าลง ~20% (เก็บ R^post ตอนสร้าง snapshot) · ex4 เครื่อง 2–5 ยังรัน คาดว่าเสร็จ 19:00–03:00 (`docs/reports/2026-11-16-prune-results.md`) |
 
 ---
 
@@ -158,7 +159,9 @@ Global-MT(v) ที่ θ = 64 (ครบ 1,674 batch, w3 commit `089726d`, เ�
 | ex1, ex2, tamper, ex4 θ = 64/128/256, ex5 | `7485556` | รอบหลักบน 10 เครื่อง |
 | ex3 (update) | `a131032` | หลังแก้ลูปซ้อนจุดแรกใน Validator (PR #11) |
 | Global-MT(v) θ = 64 (กำลังรัน) | `089726d` | `--variants "Global-MT(v),Global-MT"` |
-| **main ตอนนี้** | หลัง PR #16 | ตรวจ Merkle เร็วขึ้น 1.2–1.25× (hash เท่าเดิมทุกตัว) และแก้ลูปซ้อนที่เหลือใน Validator **ยังไม่ได้รันบน cloud** ถ้าจะใช้ตัวเลขเวลาใหม่ต้องรัน ex1, ex2, ex3, ex5 ของ AMTP ใหม่ (ex4 ไม่กระทบ) |
+| รอบ fill (AMTP ทุกชุด, ex4) | `869cf73` | placement fill ไม่เปิด query flag · `new_new/` |
+| รอบ prune (AMTP ex1, ex2, ex5, tamper) | `767289c` | fill + ทุก query flag · `runs/cloud/prune_w1/`, `new_purn/` · ex4 ของรอบนี้ (เครื่อง 2–5) ยังรัน |
+| **main ก่อนรอบ fill** | หลัง PR #16 | ตรวจ Merkle เร็วขึ้น 1.2–1.25× (hash เท่าเดิมทุกตัว) และแก้ลูปซ้อนที่เหลือใน Validator **ยังไม่ได้รันบน cloud** ถ้าจะใช้ตัวเลขเวลาใหม่ต้องรัน ex1, ex2, ex3, ex5 ของ AMTP ใหม่ (ex4 ไม่กระทบ) |
 
 ---
 
@@ -195,7 +198,7 @@ Global-MT(v) ที่ θ = 64 (ครบ 1,674 batch, w3 commit `089726d`, เ�
 |---|---|---|
 | 1 | ผล Global-MT(v) ของ w3 | ดูหัวข้อ 7 |
 | 2 | **รันบน cloud ใหม่หลัง PR #16** | ยังไม่ได้ตัดสินใจ ถ้ารันต้องรัน ex1, ex2, ex3, ex5 ของ AMTP (baseline ใช้ผลเดิมได้ เพราะโค้ดไม่เปลี่ยน) · วัดบน Mac แล้ว: query เร็วขึ้น 1.2×, update insert ที่ b = 1000 จาก 51.8 เหลือ 35.2 s, Validator insert จาก 27.6 เหลือ 14.6 s (ดู `docs/reports/2026-11-15-verify-speed.md`) |
-| 3 | **ขนาดไฟล์ที่ส่งกลับใหญ่กว่า baseline 307 B ต่อไฟล์** | ส่วนเกินมาจาก C_Kd 160 B, aad 52 B, cid+PID+ℓ +40 B, ห่อ body 31 B, หัว CT ~24 B · **C_Kd ถูกเก็บเป็นข้อความ hex** (`aes_gcm_encrypt` คืน hex แล้ว `enc(ck)` เก็บข้อความนั้น) ใหญ่ขึ้น ~60 B และขัดกติกา "นับเป็น binary" · ทางเลือก: ก. เก็บเป็น binary, ข. แยกต้นทุน access control ให้เห็นใน paper, ค. เลิกส่ง cid ซ้ำ (ต้องยืนยันก่อน) · เจ้าของงานยังไม่ตัดสินใจ · ไม่กระทบกราฟที่มี เพราะทุกกราฟใช้ proof_bytes ไม่ใช่ response_bytes |
+| 3 | **ขนาดไฟล์ที่ส่งกลับใหญ่กว่า baseline 307 B ต่อไฟล์** | ส่วนเกินมาจาก C_Kd 160 B, aad 52 B, cid+PID+ℓ +40 B, ห่อ body 31 B, หัว CT ~24 B · **C_Kd ถูกเก็บเป็นข้อความ hex** (`aes_gcm_encrypt` คืน hex แล้ว `enc(ck)` เก็บข้อความนั้น) ใหญ่ขึ้น ~60 B และขัดกติกา "นับเป็น binary" · ทางเลือก: ก. เก็บเป็น binary, ข. แยกต้นทุน access control ให้เห็นใน paper, ค. เลิกส่ง cid ซ้ำ (ต้องยืนยันก่อน) · **ตัดสินใจแล้ว 16 พ.ย.: ไม่แก้** (แก้แล้ว cid ทุกตัวเปลี่ยน และ response_bytes ของทุกรอบที่มีจะเทียบกันไม่ได้ ได้คืนแค่ ~3–5% ของขนาด response และไม่เปลี่ยนว่าใครชนะ) · ถ้า paper เทียบขนาด response รวมไฟล์ ให้เขียนว่า ~212 B ต่อไฟล์เป็นต้นทุน access control (C_Kd + aad) ที่ baseline ไม่มี และ C_Kd เก็บเป็น hex · ไม่กระทบกราฟที่มี เพราะทุกกราฟใช้ proof_bytes ไม่ใช่ response_bytes |
 | 4 | **ลดเวลาตรวจลงอีก** (อาจารย์เสนอ reuse proof / cache proof) | เสนอไว้แล้ว ยังไม่ได้ทำ ดูหัวข้อ 9 |
 | 5 | ข้อความใน paper | ยังไม่ได้แก้ ต้องแก้: เครื่อง (AWS ไม่ใช่ Mac), 15 รอบ (ไม่ใช่ 30), dataset 4 × 125k, พารามิเตอร์ Exp1–4, Exp3 นับ Validator, ส่วน Results / Conclusion / การทดลอง tamper · ยังไม่ได้ตกลงว่าใครเขียน |
 | 6 | demo | เพื่อน (PrimRoseEverD) push "Demo v2" เข้า main แล้ว (`amtp_code/web/`) ยังไม่ได้ทดสอบ |
