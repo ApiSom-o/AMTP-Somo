@@ -3,6 +3,8 @@
 There is no attack code here. The demo and the tests load the adversary plug-in
 (amtp/adversary.py), which wraps this server; the benchmarks never do.
 """
+import bisect
+import math
 import time
 
 from .core import boolean
@@ -11,7 +13,7 @@ from .dht import DHT, StorageError
 from .engine import Engine
 from .update import delta, enc_aff, request_digest
 from .core.hashing import H, TAG_QUERY, enc_bq
-from .index import SENTINEL_LO
+from .index import KEEP_MIN_PARTS, SENTINEL_LO, and_plan_greedy_on, and_prune_on, part_results_on
 
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
     """H(tag ‖ i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η): the message under τ_Q, all fields binary."""
@@ -224,15 +226,23 @@ def build_response(state, b_q, nonce, dht, timing=None):
     lookup (Search Tree + IMT evidence), eval (Boolean evaluation), proof (ASPA), fetch (DHT)."""
     t0 = time.perf_counter()
     evidence, leaf_sets = [], {}
-    for h in sorted(boolean.leaves(b_q)):
+    postings = {h: lookup(state, bytes.fromhex(h)) for h in sorted(boolean.leaves(b_q))}
+    pruned, focus_set = (_and_plan(state, b_q, postings) if and_prune_on() else (set(), None))
+    for h, posting in postings.items():
         hb = bytes.fromhex(h)
-        posting = lookup(state, hb)
         if posting is not None:
-            comps = _components(state, hb, posting)
             pos = state.imt_pos[hb]
-            evidence.append({"h": h, "status": "present", "L": comps, "pos": pos,
-                             "next": state.imt_next[hb].hex(), "n": state.imt_n,
-                             "proof": [x.hex() for x in state.imt.multiproof([pos])]})
+            imt_part = {"pos": pos, "next": state.imt_next[hb].hex(), "n": state.imt_n,
+                        "proof": [x.hex() for x in state.imt.multiproof([pos])]}
+            ent = (_focus_evidence(state, hb, posting, focus_set)
+                   if h in pruned and not _full_is_no_larger(posting, focus_set) else None)
+            if ent is not None and _focus_bytes(ent[0]) < _full_bytes(len(posting), state.post_count(hb)):
+                ent, comps = ent
+                evidence.append({"h": h, "status": "present", **ent, **imt_part})
+            else:            # full list (also when the focus form would not be smaller: still sound,
+                             # a keyword sent in full only narrows the focus set the user computes)
+                comps = _components(state, hb, posting)
+                evidence.append({"h": h, "status": "present", "L": comps, **imt_part})
             leaf_sets[h] = {(cid, pid, slot) for pid, comp in comps for cid, slot in comp}
         else:
             evidence.append(_absent_evidence(state, hb))
@@ -247,6 +257,15 @@ def build_response(state, b_q, nonce, dht, timing=None):
     slots_by_pid = {}
     for _, pid, slot in m_cov:
         slots_by_pid.setdefault(pid, set()).add(slot)
+    versions = None
+    if part_results_on():
+        # result-only partition check: open only the returned files' slots; the other covered partitions
+        # send just their version v (bound by γ), for the user's PAPC check
+        opened = {}
+        for _, pid, slot in m_q:
+            opened.setdefault(pid, set()).add(slot)
+        versions = [[pid, state.by_pid[pid].v] for pid in sorted(slots_by_pid) if pid not in opened]
+        slots_by_pid = opened
     s_cov = sorted(slots_by_pid)
 
     partitions = []
@@ -274,10 +293,13 @@ def build_response(state, b_q, nonce, dht, timing=None):
         timing.update(lookup=(t1 - t0) * 1e3, eval=(t2 - t1) * 1e3, proof=(t3 - t2) * 1e3,
                       fetch=(t4 - t3) * 1e3)
 
+    proof = {"evidence": evidence, "partitions": partitions, "domain": domain_proof}
+    if versions is not None:
+        proof["versions"] = versions
     return {
         "domain": state.domain, "epoch": state.epoch, "B_Q": b_q, "nonce": nonce,
         "R_part": state.R_part.hex(), "R_idx": state.R_idx.hex(), "R_ct": r_ct,
-        "proof": {"evidence": evidence, "partitions": partitions, "domain": domain_proof},
+        "proof": proof,
     }
 
 
@@ -288,6 +310,157 @@ def lookup(state, hb: bytes):
     if not state.cuckoo.might_contain(hb):
         return None
     return state.postings.get(hb)
+
+
+def _and_plan(state, b_q, postings):
+    """AND pruning: which present keywords may be sent as focus evidence, and the focus set F.
+    Every keyword in a chosen 'full' set is sent in full; for an AND node the child with the fewest
+    partitions is chosen, an OR node needs all its children. F = boolean.focus over the full keywords
+    (the rule the user applies). Returns (pruned keys, F); nothing is pruned if every key must be full."""
+    sel = {h: ({pid for pid, _ in p} if p is not None else set()) for h, p in postings.items()}
+    size = {h: (state.post_count(bytes.fromhex(h)) if p is not None else 0) for h, p in postings.items()}
+
+    def data_key(s):
+        """Tie-break from the data only (PIDs and component sizes), never from the keyword keys h, which
+        are random per domain key: the same query on the same files picks the same full keyword."""
+        return (sorted(s[0]), sorted(sorted((pid, len(c)) for pid, c in postings[h]) for h in s[1]
+                                     if postings[h] is not None))
+
+    def plan(node):
+        if node[0] == "leaf":
+            return sel[node[1]], {node[1]}
+        subs = [plan(c) for c in node[1]]
+        if node[0] == "AND":
+            cost = [(len(s[0]), sum(size[h] for h in s[1])) for s in subs]
+            best = min(cost)
+            tied = [s for s, c in zip(subs, cost) if c == best]
+            return tied[0] if len(tied) == 1 else min(tied, key=data_key)
+        return set().union(*(s[0] for s in subs)), set().union(*(s[1] for s in subs))
+
+    _, full = plan(b_q)
+    full |= {h for h, p in postings.items() if p is None}          # absent keys: proven empty
+    if and_plan_greedy_on():
+        full = _grow_full(b_q, postings, sel, size, full, data_key)
+    pruned = {h for h in postings if h not in full}
+    if not pruned:
+        return set(), None
+    return pruned, boolean.focus(b_q, {h: sel[h] for h in full})
+
+
+def _focus_cost(n_sel: int, opened_segs: int, seg_postings: int, missing: int) -> int:
+    """Estimated wire size of one keyword's focus evidence (as _focus_bytes counts it): its components in F,
+    about two neighbour leaves per partition of F it lacks (at most n_sel), and the R^post multiproof."""
+    nb = min(2 * missing, n_sel)
+    opened = max(1, opened_segs + nb)
+    size = 1 << max(0, (n_sel - 1).bit_length())
+    siblings = int(opened * max(0.0, math.log2(size / opened))) if opened < size else 0
+    return (3 * _INT + _HASH + opened_segs * 3 * _INT + seg_postings * (_HASH + _INT)
+            + _INT + nb * (3 * _INT + _HASH) + _INT + siblings * _HASH)
+
+
+_GREEDY_MIN_FOCUS = 8     # the planner runs only when F has more partitions than this
+
+
+def _grow_full(b_q, postings, sel, size, full, data_key):
+    """Greedy: send one more keyword in full while that lowers the estimated proof. A keyword sent in full
+    costs its whole list but shrinks F (boolean.focus is an intersection under AND), so every other partial
+    keyword opens fewer components. Each candidate is scored with set operations only; the other keywords'
+    focus cost is scaled by |F'| / |F| (independence estimate). The user's check is unchanged: it already
+    accepts any set of full keywords that bounds F."""
+    present = [h for h, p in postings.items() if p is not None]
+
+    def partial_cost(h, F):
+        s = sel[h]
+        k = len(F & s)                    # components of h inside F; their postings ≈ k x average component size
+        return min(_focus_cost(len(s), k, round(k * size[h] / len(s)), len(F) - k),
+                   _full_bytes(len(s), size[h]))
+
+    full = set(full)
+    F = boolean.focus(b_q, {h: sel[h] for h in full})
+    if F is None or len(F) <= _GREEDY_MIN_FOCUS:   # already small: another full list cannot pay for itself
+        return full
+    while F:
+        partial = [h for h in present if h not in full]
+        if not partial:
+            break
+        costs = {h: partial_cost(h, F) for h in partial}
+        best, best_gain = None, 0
+        for c in sorted(partial, key=lambda h: (len(sel[h]), size[h], data_key((sel[h], {h})))):
+            F2 = boolean.focus(b_q, {h: sel[h] for h in full | {c}})
+            if F2 is None:
+                continue
+            shrink = len(F2) / len(F)
+            gain = (sum(costs[h] for h in partial if h != c) * (1 - shrink)
+                    - (_full_bytes(len(sel[c]), size[c]) - costs[c]))
+            if gain > best_gain:
+                best, best_gain = c, gain
+        if best is None:
+            break
+        full.add(best)
+        F = boolean.focus(b_q, {h: sel[h] for h in full})
+    return full
+
+
+def _focus_evidence(state, hb: bytes, posting, focus_set):
+    """Focus evidence of one present keyword for the partitions F: its component in every partition of F it
+    has (segs), and for every partition of F it lacks the two adjacent γ leaves around that PID (nb, as
+    preimages PID, v, H(Enc(L))), opened together in its R^post tree. ρ = H(h ‖ |Sel| ‖ R^post) as usual."""
+    pids = [pid for pid, _ in posting]
+    at = {pid: j for j, pid in enumerate(pids)}
+    seg_pos, nb_pos = set(), set()
+    for t in focus_set:
+        if t in at:
+            seg_pos.add(at[t])
+        else:
+            k = bisect.bisect_left(pids, t)                 # pids[k-1] < t < pids[k]
+            if k > 0:
+                nb_pos.add(k - 1)
+            if k < len(pids):
+                nb_pos.add(k)
+    nb_pos -= seg_pos
+    segs, comps = [], []
+    for j in sorted(seg_pos):
+        pid, comp = posting[j]
+        wire = [(cid.hex(), slot) for cid, slot in comp]
+        segs.append([j, pid, wire])
+        comps.append((pid, wire))
+    inner = state.post_inner(hb)                          # H(Enc(L_j)), kept with the snapshot
+    nb = [[j, posting[j][0], state.by_pid[posting[j][0]].v, inner[j].hex()]
+          for j in sorted(nb_pos)]
+    tree = state.post_tree(hb)
+    opened = sorted(seg_pos | nb_pos)
+    ent = {"mode": "focus", "n_sel": len(pids), "R_post": tree.root.hex(), "segs": segs, "nb": nb,
+           "post_proof": [x.hex() for x in tree.multiproof(opened)] if opened else []}
+    return ent, comps
+
+
+_HASH, _INT = 32, 8       # the size rule of baselines/wire_sizes.py (binary: hash 32 B, number 8 B)
+
+
+def _full_is_no_larger(posting, focus_set) -> bool:
+    """For a keyword in fewer than KEEP_MIN_PARTS partitions (its R^post data is not kept): True when its full
+    list is no larger than ANY focus evidence could be (a lower bound: the fixed fields, its components inside
+    F, and at least one neighbour leaf if it lacks a partition of F). Then the full list is sent without
+    building the focus evidence: the same choice, without rebuilding a tree that would be thrown away."""
+    if len(posting) >= KEEP_MIN_PARTS:
+        return False
+    inside = sum(3 * _INT + len(c) * (_HASH + _INT) for pid, c in posting if pid in focus_set)
+    n_inside = sum(1 for pid, _ in posting if pid in focus_set)
+    fixed = _INT + _HASH + _INT + _INT + _INT        # n_sel, R^post, #segs, #nb, #proof (as _focus_bytes)
+    lower = fixed + inside + (3 * _INT + _HASH if len(focus_set) > n_inside else 0)
+    return _full_bytes(len(posting), sum(len(c) for _, c in posting)) <= lower
+
+
+def _full_bytes(n_comps: int, n_postings: int) -> int:
+    """Wire size of a full posting list L_h of n_comps components holding n_postings files
+    (as wire_sizes.amtp_proof_bytes counts it)."""
+    return _INT + n_comps * 2 * _INT + n_postings * (_HASH + _INT)
+
+
+def _focus_bytes(ent) -> int:
+    """Wire size of the focus part of an evidence entry (as wire_sizes.amtp_proof_bytes counts it)."""
+    return (_INT + _HASH + _INT + sum(3 * _INT + len(c) * (_HASH + _INT) for _, _, c in ent["segs"])
+            + _INT + len(ent["nb"]) * (3 * _INT + _HASH) + _INT + len(ent["post_proof"]) * _HASH)
 
 
 def _absent_evidence(state, hb: bytes):

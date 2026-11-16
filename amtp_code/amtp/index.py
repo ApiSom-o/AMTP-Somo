@@ -5,12 +5,14 @@ DomainState is the Cloud Server's read-only query snapshot of one finalized epoc
 transition on its dirty paths; Engine.snapshot() then rebuilds this snapshot in full and the
 server checks that its R_D equals the incremental one.
 """
+import gc
+import hashlib
 import os
 import re
 from dataclasses import dataclass, field
 
 from .bptree import BPlusTree
-from .core.hashing import H, enc_posting
+from .core.hashing import TAG_POSTING, H, HashCounter, enc_posting
 from .cuckoo import CuckooFilter
 from .core.merkle import MerkleTree, merkle_root
 
@@ -62,6 +64,83 @@ def gamma_has_v() -> bool:
     return _GAMMA_V
 
 
+# AND pruning (study, default off): the server answers an AND with the full posting list of one keyword
+# and, for every other keyword, only its components in the partitions that list covers (amtp/server.py).
+# AMTP_AND_PRUNE=1 in the environment, or set_and_prune(True) before the snapshots are built. The user
+# accepts both answer forms whatever this setting is (amtp/user.py).
+_AND_PRUNE = os.environ.get("AMTP_AND_PRUNE", "0") == "1"
+
+
+def set_and_prune(on: bool) -> None:
+    global _AND_PRUNE
+    _AND_PRUNE = bool(on)
+
+
+def and_prune_on() -> bool:
+    return _AND_PRUNE
+
+
+# AND pruning planner (study, default off): besides the keyword with the fewest partitions, send more
+# keywords in full when that shrinks the focus set enough to lower the proof (amtp/server.py _grow_full).
+# Server choice only; the user's check is the same. AMTP_AND_GREEDY=1 or set_and_plan_greedy(True).
+_AND_GREEDY = os.environ.get("AMTP_AND_GREEDY", "0") == "1"
+
+
+def set_and_plan_greedy(on: bool) -> None:
+    global _AND_GREEDY
+    _AND_GREEDY = bool(on)
+
+
+def and_plan_greedy_on() -> bool:
+    return _AND_GREEDY
+
+
+# Result-only partition check (study, default off): the server opens partition slots and domain-tree leaves
+# only for the returned files; the versions v of the other covered partitions travel as a plain list and are
+# bound by γ = H(PID ‖ v ‖ H(Enc(L))). AMTP_PART_RESULTS=1 or set_part_results(True). The user accepts both
+# answer forms whatever this setting is (amtp/user.py).
+_PART_RESULTS = os.environ.get("AMTP_PART_RESULTS", "0") == "1"
+
+
+def set_part_results(on: bool) -> None:
+    global _PART_RESULTS
+    _PART_RESULTS = bool(on)
+
+
+def part_results_on() -> bool:
+    return _PART_RESULTS
+
+
+_U64_MAX = (1 << 64) - 1
+_LEN8 = (8).to_bytes(4, "big")
+_LEN32 = (32).to_bytes(4, "big")
+
+
+def gamma_wire(pid: str, v: int, component) -> bytes:
+    """γ of a posting component as it arrives on the wire (cid hex or bytes, slot int): the SAME bytes, the
+    same input checks (ValueError on a bad cid or slot) and the same HashCounter counts as gamma(), without
+    the generic per-part encoding of H. Used in the user's PAPC check (the hot loop); falls back to gamma()
+    for γ without v or a non-string PID."""
+    if not _GAMMA_V or type(pid) is not str or type(v) is not int or v < 0 or v > _U64_MAX:
+        return gamma(pid, v, component)
+    parts = [TAG_POSTING, len(component).to_bytes(8, "big")]
+    for cid, slot in component:
+        b = bytes.fromhex(cid) if isinstance(cid, str) else cid
+        if not isinstance(b, bytes) or len(b) != 32:
+            raise ValueError("cid must be 32 bytes")
+        if type(slot) is not int or slot < 0:
+            raise ValueError(f"expected a non-negative integer, got {slot!r}")
+        parts.append(b)
+        parts.append(slot.to_bytes(8, "big"))
+    enc = b"".join(parts)
+    inner = hashlib.sha256(len(enc).to_bytes(4, "big") + enc).digest()       # H(Enc(L))
+    p = pid.encode("utf-8")
+    g = hashlib.sha256(len(p).to_bytes(4, "big") + p + _LEN8 + v.to_bytes(8, "big") + _LEN32 + inner).digest()
+    HashCounter.calls += 2
+    HashCounter.bytes += (4 + len(enc)) + (4 + len(p) + 4 + 8 + 4 + 32)
+    return g
+
+
 def gamma_inner(pid: str, v: int, inner: bytes) -> bytes:
     """γ from its inner hash H(Enc(L)): H(PID ‖ v ‖ inner), or H(PID ‖ inner) when γ leaves v out"""
     return H(pid, v, inner) if _GAMMA_V else H(pid, inner)
@@ -100,6 +179,9 @@ def imt_next(keys) -> dict:
     return {order[i]: order[i + 1] for i in range(len(order) - 1)}
 
 
+KEEP_MIN_PARTS = 3      # AND pruning: keep R^post data for keywords in at least this many partitions
+
+
 class DomainState:
     """One finalized snapshot of a domain at one epoch."""
 
@@ -109,7 +191,16 @@ class DomainState:
         self.partitions = partitions            # ordered: position in partition tree
         self.fwd = fwd                          # cid -> set of keyword keys h
         self.imt_layout = imt_layout            # IMT position -> key h / None (freed); None = sorted
-        self._build()
+        # The build allocates millions of lists and dicts and creates no reference cycles; the cyclic GC would
+        # rescan them over and over (measured: +26% build time with AND pruning, N = 50k). Pause it here;
+        # reference counting still frees everything as usual.
+        paused = gc.isenabled()
+        gc.disable()
+        try:
+            self._build()
+        finally:
+            if paused:
+                gc.enable()
 
     def _build(self):
         # Loc_i: where every cid lives
@@ -141,9 +232,21 @@ class DomainState:
 
         # PAPC per keyword, then the indexed IMT: leaf H(h ‖ ρ ‖ next(h)) at its position
         self.rho = {}
+        # AND pruning only: for every keyword in at least KEEP_MIN_PARTS partitions, the R^post tree, the inner
+        # hashes H(Enc(L_j)) of its components (the neighbour preimages of a focus proof) and its number of
+        # postings. Index data built with the snapshot (same work as the γ below), not a cache filled by
+        # queries. Smaller keywords (most of them: the median keyword is in one file) are rebuilt on demand
+        # in a few hashes; keeping them would cost several Python objects each.
+        self._post_trees, self._post_inner, self._post_count = {}, {}, {}
+        keep = and_prune_on()
         for h, L in self.postings.items():
-            gammas = [gamma(pid, self.by_pid[pid].v, comp) for pid, comp in L]
-            self.rho[h] = rho(h, len(L), merkle_root(gammas))
+            if keep and len(L) >= KEEP_MIN_PARTS:
+                tree, inners, count = self._post_parts(L)
+                self._post_trees[h], self._post_inner[h], self._post_count[h] = tree, inners, count
+                r_post = tree.root
+            else:
+                r_post = merkle_root([gamma(pid, self.by_pid[pid].v, comp) for pid, comp in L])
+            self.rho[h] = rho(h, len(L), r_post)
         layout = self.imt_layout or sorted_imt_layout(self.rho)
         if set(layout) - {None, SENTINEL_LO} != set(self.rho) or layout[0] != SENTINEL_LO:
             raise ValueError("IMT layout does not hold exactly the indexed keys")
@@ -157,6 +260,27 @@ class DomainState:
         self.R_part = self.part_tree.root
         self.R_idx = self.imt.root
         self.R_D = domain_root(self.domain, self.epoch, self.R_part, self.R_idx)
+
+    def post_tree(self, h: bytes) -> MerkleTree:
+        """The R^post tree of keyword h (γ in PID order): kept from the build (AND pruning, keyword in at least
+        KEEP_MIN_PARTS partitions), otherwise rebuilt here from the snapshot's own postings (not kept)."""
+        tree = self._post_trees.get(h)
+        return tree if tree is not None else self._post_parts(self.postings[h])[0]
+
+    def post_inner(self, h: bytes) -> list:
+        """H(Enc(L_j)) of every component of keyword h, in PID order (see post_tree)."""
+        inner = self._post_inner.get(h)
+        return inner if inner is not None else self._post_parts(self.postings[h])[1]
+
+    def post_count(self, h: bytes) -> int:
+        """Number of postings (files) of keyword h."""
+        n = self._post_count.get(h)
+        return n if n is not None else sum(len(comp) for _, comp in self.postings[h])
+
+    def _post_parts(self, L):
+        inners = [H(enc_posting(comp)) for _, comp in L]
+        tree = MerkleTree([gamma_inner(pid, self.by_pid[pid].v, x) for (pid, _), x in zip(L, inners)])
+        return tree, inners, sum(len(comp) for _, comp in L)
 
 
 def domain_root(domain: str, epoch: int, r_part: bytes, r_idx: bytes) -> bytes:

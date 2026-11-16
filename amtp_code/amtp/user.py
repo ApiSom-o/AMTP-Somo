@@ -1,5 +1,6 @@
 """Data User side: build the trapdoor (Phase 4, Step 1), verify the answer
 (Phase 5, Steps 1-3) and decrypt only after acceptance (Phase 5, Step 4)."""
+import bisect
 import json
 import os
 import time
@@ -8,7 +9,7 @@ from .core import boolean
 from .core.crypto import aes_gcm_decrypt, hmac_tag, unpack_ct, unwrap, InvalidTag
 from .dht import ciphertext_id
 from .core.hashing import H, enc_bq, lp, u64
-from .index import domain_root, gamma, imt_leaf, rho
+from .index import domain_root, gamma_inner, gamma_wire, imt_leaf, rho
 from .core.merkle import merkle_root, multiverify
 from .owner import keyword_key
 from .server import query_digest
@@ -167,7 +168,18 @@ class DataUser:
 
     @staticmethod
     def _parse_postings(e):
-        comps, pids, seen = e["L"], [], set()
+        mode = e.get("mode", "full")
+        if mode == "focus":
+            segs = e["segs"]
+            js = [j for j, _, _ in segs]
+            if js != sorted(set(js)):
+                raise Reject("idx", "focus components are not in canonical order")
+            comps = [(pid, comp) for _, pid, comp in segs]
+        elif mode == "full":
+            comps = e["L"]
+        else:
+            raise Reject("idx", f"unknown evidence form {mode!r}")
+        pids, seen = [], set()
         out = set()
         for pid, comp in comps:
             if not comp:
@@ -188,39 +200,120 @@ class DataUser:
         descs = {d["pid"]: d for d in resp["proof"]["partitions"]}
         if len(descs) != len(resp["proof"]["partitions"]):
             raise Reject("papc", "a partition descriptor appears twice")
+        vers = {pid: d["v"] for pid, d in descs.items()}      # PID -> v for every γ the user rebuilds
+        if "versions" in resp["proof"]:
+            # result-only partition check: the other covered partitions send only v, bound by γ (a wrong v
+            # gives a γ that is not in R^post, so ρ̂ misses the IMT)
+            plain = resp["proof"]["versions"]
+            pids = [pid for pid, _ in plain]
+            if pids != sorted(set(pids)) or any(pid in vers for pid in pids):
+                raise Reject("papc", "plain version list is not canonical or repeats a described partition")
+            vers.update((pid, v) for pid, v in plain)
         r_idx = bytes.fromhex(resp["R_idx"])
+        ev = resp["proof"]["evidence"]
+        focus_set = None
+        if any(e.get("mode") == "focus" for e in ev):
+            # AND pruning: the fully sent (and absent) keywords must bound where every match can lie
+            known = {e["h"]: ({pid for pid, _ in e["L"]} if e["status"] == "present" else set())
+                     for e in ev if e.get("mode", "full") == "full"}
+            focus_set = boolean.focus(boolean.from_json(resp["B_Q"]), known)
+            if focus_set is None:
+                raise Reject("papc", "partial posting lists, but the full ones do not bound the "
+                                     "partitions a match can lie in")
         n_ok = 0
-        for e in resp["proof"]["evidence"]:
+        for e in ev:
             if e["status"] == "absent":          # already proven by the non-membership check
                 continue
-            gammas = []
-            for pid, comp in e["L"]:
-                if pid not in descs:
-                    raise Reject("papc", f"no version supplied for partition {pid}")
-                gammas.append(gamma(pid, descs[pid]["v"], comp))
             hb = bytes.fromhex(e["h"])
-            leaf = imt_leaf(hb, rho(hb, len(e["L"]), merkle_root(gammas)), bytes.fromhex(e["next"]))
+            if e.get("mode") == "focus":
+                r_post = self._focus_root(e, vers, focus_set)
+                leaf = imt_leaf(hb, rho(hb, e["n_sel"], r_post), bytes.fromhex(e["next"]))
+            else:
+                gammas = []
+                for pid, comp in e["L"]:
+                    if pid not in vers:
+                        raise Reject("papc", f"no version supplied for partition {pid}")
+                    gammas.append(gamma_wire(pid, vers[pid], comp))
+                leaf = imt_leaf(hb, rho(hb, len(e["L"]), merkle_root(gammas)), bytes.fromhex(e["next"]))
             if not multiverify(r_idx, e["n"], {e["pos"]: leaf},
                                [bytes.fromhex(x) for x in e["proof"]]):
                 raise Reject("papc", "rebuilt ρ̂ is not in the index tree: "
                                      "a posting list was changed or shortened")
             n_ok += 1
-        results["papc"] = (True, f"rebuilt and matched {n_ok} posting commitment(s)")
+        results["papc"] = (True, f"rebuilt and matched {n_ok} posting commitment(s)"
+                                 + (f", partial lists cover all {len(focus_set)} focus partition(s)"
+                                    if focus_set is not None else ""))
         return descs
+
+    @staticmethod
+    def _focus_root(e, vers, focus_set) -> bytes:
+        """R^post of a keyword sent as focus evidence. Opens its components in F (segs) and the two
+        adjacent γ leaves around every partition of F it has no component in (nb), all in ONE multiproof
+        of its R^post tree of n_sel leaves. γ leaves are in strictly increasing PID order (the DO's
+        Validator checks every insertion against its neighbours), so adjacent leaves p_j < t < p_{j+1}
+        prove the keyword has no component in t. Returns R^post; the caller checks ρ in the IMT."""
+        n_sel = e["n_sel"]
+        if not isinstance(n_sel, int) or n_sel < 1:
+            raise Reject("papc", "a present keyword must have at least one posting component")
+        leaves, label, seg_pids = {}, {}, set()
+        for j, pid, comp in e["segs"]:
+            if pid not in vers:
+                raise Reject("papc", f"no version supplied for partition {pid}")
+            leaves[j], label[j] = gamma_wire(pid, vers[pid], comp), pid
+            seg_pids.add(pid)
+        for j, pid, v, inner in e["nb"]:
+            if j in leaves:
+                raise Reject("papc", "one γ position is opened twice")
+            leaves[j], label[j] = gamma_inner(pid, v, bytes.fromhex(inner)), pid
+        if any(not (isinstance(j, int) and 0 <= j < n_sel) for j in leaves):
+            raise Reject("papc", "a γ position lies outside the keyword's posting tree")
+        r_post = bytes.fromhex(e["R_post"])
+        if leaves:
+            if not multiverify(r_post, n_sel, leaves, [bytes.fromhex(x) for x in e["post_proof"]]):
+                raise Reject("papc", "an opened γ is not in the keyword's R^post: "
+                                     "a posting component was changed or invented")
+        elif e["post_proof"]:
+            raise Reject("papc", "a proof without opened γ leaves")
+        order = sorted(label.items())                      # (position, PID), by position
+        if any(a[1] >= b[1] for a, b in zip(order, order[1:])):
+            raise Reject("papc", "opened γ leaves are not in PID order")
+        pos_of = [j for j, _ in order]
+        pid_of = [p for _, p in order]
+        for t in focus_set:
+            if t in seg_pids:
+                continue
+            k = bisect.bisect_left(pid_of, t)
+            if k < len(pid_of) and pid_of[k] == t:
+                raise Reject("papc", f"partition {t} is opened only as a neighbour, its component is withheld")
+            lo = pos_of[k - 1] if k > 0 else -1               # position just below t (-1 = none)
+            hi = pos_of[k] if k < len(pid_of) else n_sel      # position just above t (n_sel = none)
+            if hi != lo + 1:
+                raise Reject("papc", f"no adjacent γ leaves prove the keyword is absent from partition {t}: "
+                                     "a posting component was withheld")
+        return r_post
 
     def _check_partitions(self, resp, m_h, descs, results):
         m_cov = set().union(*m_h.values()) if m_h else set()
         s_cov = {pid for _, pid, _ in m_cov}
-        if set(descs) != s_cov:
-            raise Reject("part", "partition descriptors do not match the covered partitions")
+        if "versions" in resp["proof"]:
+            # result-only partition check: open exactly the locations of the files Eval(B_Q) selects; every
+            # other covered partition must appear in the plain version list (checked by PAPC through γ)
+            opened = boolean.evaluate(boolean.from_json(resp["B_Q"]), m_h)
+            plain = {pid for pid, _ in resp["proof"]["versions"]}
+            if set(descs) != {pid for _, pid, _ in opened} or plain != s_cov - set(descs):
+                raise Reject("part", "partition descriptors do not match the result partitions")
+        else:
+            opened = m_cov
+            if set(descs) != s_cov:
+                raise Reject("part", "partition descriptors do not match the covered partitions")
         where = {}
         for cid, pid, slot in m_cov:
             if where.setdefault(cid, (pid, slot)) != (pid, slot):
                 raise Reject("part", f"file {cid[:8]} claimed at two different locations")
-        # group the covered locations by partition once (O(|m_cov|)), instead of scanning
-        # all of m_cov for every partition (O(|S_cov| x |m_cov|))
+        # group the opened locations by partition once (O(|opened|)), instead of scanning
+        # all of them for every partition (O(|S_cov| x |m_cov|))
         by_pid = {}
-        for cid, pid, slot in m_cov:
+        for cid, pid, slot in opened:
             by_pid.setdefault(pid, []).append((cid, slot))
         dom_leaves, positions = {}, set()
         for pid, d in descs.items():
@@ -242,8 +335,9 @@ class DataUser:
                                [bytes.fromhex(x) for x in dp["proof"]]):
                 raise Reject("part", "partition root A = H(PID ‖ v ‖ R_P) is not in the "
                                      "domain's partition tree (forged partition)")
-        results["part"] = (True, f"{len(m_cov)} location(s) in {len(descs)} partition(s), "
-                                 f"one shared domain multiproof")
+        results["part"] = (True, f"{len(opened)} location(s) in {len(descs)} partition(s), "
+                                 f"one shared domain multiproof"
+                                 + (" (result files only)" if opened is not m_cov else ""))
 
     def _check_result(self, ctx, resp, m_h, results):
         m_hat = boolean.evaluate(boolean.from_json(ctx["B_Q"]), m_h)

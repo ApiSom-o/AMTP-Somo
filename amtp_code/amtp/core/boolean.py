@@ -133,6 +133,28 @@ def evaluate(ast, leaf_sets: dict) -> set:
     return set().union(*parts)
 
 
+def focus(ast, known: dict):
+    """The partitions every match of B_Q must lie in, from the leaves whose full partition set is known
+    (`known`: leaf -> set of partitions). None = not bounded (some needed leaf is unknown).
+    leaf: its set if known · AND: intersection of the bounded children · OR: union, bounded only if every
+    child is. A file matching B_Q lies in a partition of every keyword it satisfies, so by induction it
+    lies in focus(B_Q). Server (AND pruning) and user apply this same rule."""
+    if ast[0] == "leaf":
+        return set(known[ast[1]]) if ast[1] in known else None
+    parts = [focus(c, known) for c in ast[1]]
+    if ast[0] == "AND":
+        bounded = sorted((p for p in parts if p is not None), key=len)
+        if not bounded:
+            return None
+        out = set(bounded[0])
+        for p in bounded[1:]:
+            out &= p
+        return out
+    if any(p is None for p in parts):
+        return None
+    return set().union(*parts)
+
+
 def to_text(ast) -> str:
     if ast[0] == "leaf":
         return f'"{ast[1]}"' if " " in ast[1] else ast[1]
