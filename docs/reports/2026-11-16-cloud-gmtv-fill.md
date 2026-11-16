@@ -4,7 +4,7 @@
 
 ## ทำอะไร
 
-1. **Global-MT(v), θ = 64 จากเครื่อง w3:** ครบ 1,674 batch แล้ว นำมาใส่เป็นเส้นที่สามในกราฟ split/merge ของผลหลัก (`gamma_with_v`) ตาม HANDOFF ข้อ 7
+1. **Global-MT(v), θ = 64 จากเครื่อง w3:** ครบ 1,674 batch แล้ว นำมาใส่เป็นเส้นที่สามในกราฟ split/merge ของผลหลักตาม HANDOFF ข้อ 7 โดยเก็บแยกไว้ใน `new_new/`
 2. **รอบ fill:** เพิ่มผลที่เหลือของเครื่อง w1–w4 ได้แก่ ex4 θ = 64/128/256, ex3, ex5 และ xdomains แล้ว plot ใหม่ทั้งชุด
 3. **แก้ `plot_paper.py`:** ให้รวมโฟลเดอร์ split/merge ที่มี θ เดียวกัน (เช่น `..._t64` กับ `..._t64_gmtv`) เดิมโฟลเดอร์หลังจะเขียนทับโฟลเดอร์แรก ทำให้กราฟ θ = 64 หายไปเหลือแค่ Global-MT(v)
 4. **ใช้การแก้ `plot_story.py` และ `plot_paper.py` ที่มีคนทำค้างไว้:** เพิ่มเส้น Global-MT(v), ใช้ log scale ในกราฟ partition ใหญ่สุด และแก้คำอธิบาย workload ให้ตรงโค้ด ผมตรวจแล้วว่าคำอธิบายถูก: `skew = 0.95` คือ 95% ของไฟล์ใหม่ถูกบังคับลงกลุ่ม hot (`bench/workload.py`) ไม่ใช่ Zipf s = 0.95 ตามคำอธิบายเดิม
@@ -19,7 +19,7 @@
 
 - **ความเร็วของ w3 เทียบ w1** (HANDOFF 7.4): Global-MT แบบไม่มี v ซึ่งรันทั้งสองเครื่อง ใช้ 5.88 µs ต่อ hash บน w3 และ 6.04 µs บน w1 ต่างกัน 2.7% จึงเทียบเวลาของ Global-MT(v) กับ AMTP ในรอบหลักได้
 - **workload เหมือนกันทุกโฟลเดอร์:** n = 100k, b = 100, skew 0.95, ลบ 65% ของกลุ่ม hot, seed 1, θ_min = θ_max / 4
-- **คัดเฉพาะแถวที่ใช้:** w3 รันทั้ง Global-MT(v) และ Global-MT ส่วนรอบหลักมี Global-MT อยู่แล้ว จึงคัดเฉพาะแถว Global-MT(v) ไปไว้ใน `gamma_with_v/amtp/splitmerge_n100000_t64_gmtv/` ผลดิบอยู่ที่ `runs/cloud/w3/paper_v_gmtv/` ไม่ได้แก้
+- **คัดเฉพาะแถวที่ใช้:** w3 รันทั้ง Global-MT(v) และ Global-MT ส่วนรอบหลักมี Global-MT อยู่แล้ว จึงคัดเฉพาะแถว Global-MT(v) ไปไว้ใน `new_new/data/global_mt_v_t64/` ผลดิบอยู่ที่ `runs/cloud/w3/paper_v_gmtv/` ไม่ได้แก้
 
 ## ผล
 
@@ -42,33 +42,37 @@
 
 **ex3 update ของรอบ fill:** b = 1,000 insert ใช้ 14.1 s (รอบหลัก 76.5 s) และ delete ใช้ 20.1 s (รอบหลัก 63.6 s) ที่เร็วขึ้นมาจากการแก้ Validator, engine แบบรวม Merkle และ placement fill
 
-## กราฟอยู่ไหน
+## ค่าและกราฟอยู่ไหน
 
-| กราฟ | ที่อยู่ | มีอะไรใหม่ |
-|---|---|---|
-| กราฟเล่าเรื่อง ผลหลัก | `baselines/results/new_amtp_result/graph_op/main/` | `update_vs_batch.png` และ `max_partition_vs_batch.png` มีเส้น Global-MT(v) แล้ว |
-| กราฟตามแผน paper ผลหลัก | `baselines/results/new_amtp_result/gamma_with_v/figures/ex4_split_merge/` | `theta_64/` ทั้ง 4 รูปมี Global-MT(v) และรูปเทียบตาม θ ถูกอัปเดต |
-| กราฟเล่าเรื่อง รอบ fill | `baselines/results/new_amtp_result/graph_fill/main/` | เพิ่ม `update_vs_batch`, `max_partition_vs_batch`, `query_vs_domains`, `update_vs_domains` |
-| กราฟตามแผน paper รอบ fill | `baselines/results/new_amtp_result/fill_v/figures/` | ใหม่ทั้งชุด 39 รูป (ex1–ex5) |
+**ทุกอย่างที่ใหม่อยู่ใน `baselines/results/new_new/` แยกจากผลเดิมทั้งหมด** (ดู `new_new/README.md`) โฟลเดอร์เดิม `new_amtp_result/` ไม่ถูกแก้ เหมือน main ทุกไฟล์
 
-กราฟอื่นในผลหลักออกมาเหมือนเดิมทุก byte เปลี่ยนเฉพาะกราฟ split/merge ตัวเลขทุกจุดอยู่ใน `figure_points.csv` ของแต่ละโฟลเดอร์
+| อะไร | ที่อยู่ |
+|---|---|
+| ข้อมูล Global-MT(v) θ = 64 | `new_new/data/global_mt_v_t64/` |
+| ข้อมูลรอบ fill ครบทุกชุด | `new_new/data/fill/` |
+| กราฟผลหลัก + Global-MT(v) | `new_new/graphs/main_with_global_mt_v/story/` (11 รูป) และ `.../paper/` (39 รูป) |
+| กราฟรอบ fill | `new_new/graphs/fill/story/` (11 รูป) และ `.../paper/` (39 รูป) |
+| ผลดิบจาก cloud | `baselines/results/runs/cloud/w3/paper_v_gmtv/`, `runs/cloud/fill_w1..fill_w4/` |
 
 ## ยังไม่ครบ
 
 - **Global-MT(v) ของรอบ fill (worker7):** ยังไม่ได้ดึงผลเข้า repo กราฟ split/merge ของรอบ fill จึงมีแค่ AMTP กับ Static-MT
-- **เมื่อดึงผลแล้ว:** ให้วางเป็น `fill_v/amtp/splitmerge_n100000_t64_gmtv/` เฉพาะแถว Global-MT(v) แล้วรันคำสั่งด้านล่างซ้ำ
+- **เมื่อดึงผลแล้ว:** ให้วางเฉพาะแถว Global-MT(v) เป็น `new_new/data/fill_global_mt_v_t64/` ลิงก์เข้า run ของ fill เป็น `amtp/splitmerge_n100000_t64_gmtv` แล้วรันคำสั่งด้านล่างซ้ำ
 
 ## วิธีทำกราฟซ้ำ
 
 ```
-# ผลหลัก
-.venv/bin/python baselines/plot_story.py                       # -> graph_op/
-.venv/bin/python baselines/plot_paper.py baselines/results/new_amtp_result/gamma_with_v
-# รอบ fill: amtp จาก fill_v และ baseline จาก gamma_with_v (รันบนเครื่องรุ่นเดียวกัน)
-T=$(mktemp -d); R=$PWD/baselines/results/new_amtp_result
-ln -s $R/fill_v/amtp $T/amtp; for s in secollab chen du; do ln -s $R/gamma_with_v/$s $T/$s; done
-.venv/bin/python baselines/plot_story.py --run $T --out $R/graph_fill
-.venv/bin/python baselines/plot_paper.py $T --out $R/fill_v/figures
+R=$PWD/baselines/results/new_amtp_result; N=$PWD/baselines/results/new_new
+# ผลหลัก + Global-MT(v): amtp เดิม + โฟลเดอร์ Global-MT(v) เป็น splitmerge_n100000_t64_gmtv
+T=$(mktemp -d); mkdir $T/amtp; for e in $R/gamma_with_v/amtp/*; do ln -s $e $T/amtp/; done
+ln -s $N/data/global_mt_v_t64 $T/amtp/splitmerge_n100000_t64_gmtv
+for s in secollab chen du; do ln -s $R/gamma_with_v/$s $T/$s; done
+.venv/bin/python baselines/plot_story.py --run $T --out $N/graphs/main_with_global_mt_v/story
+.venv/bin/python baselines/plot_paper.py $T --out $N/graphs/main_with_global_mt_v/paper
+# รอบ fill: amtp จาก new_new/data/fill, baseline จาก gamma_with_v (เครื่องรุ่นเดียวกัน)
+T=$(mktemp -d); ln -s $N/data/fill $T/amtp; for s in secollab chen du; do ln -s $R/gamma_with_v/$s $T/$s; done
+.venv/bin/python baselines/plot_story.py --run $T --out $N/graphs/fill/story
+.venv/bin/python baselines/plot_paper.py $T --out $N/graphs/fill/paper
 ```
 
 ## สถานะ

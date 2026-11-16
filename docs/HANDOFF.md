@@ -61,7 +61,7 @@
 | การวางไฟล์ (15 พ.ย.) | **fill**: partition ของกลุ่มที่มีไฟล์มากที่สุดแต่ยังไม่ถึง θ_max ถ้าเต็มหมดวางต่อแล้วให้ split แก้ · Static-MT ใช้กติกาเดียวกัน · ex3 ฟรีซ partition เหมือน paper · merge ตาม paper สมการ 34 · รันด้วย `AMTP_PLACEMENT=fill` (`docs/reports/2026-11-15-fill-placement.md`) |
 | engine (15 พ.ย.) | commit อัปเดต Merkle tree แบบรวมครั้งเดียว (`MerkleTree.set_leaves`) และค้น Search Tree ครั้งเดียวต่อ keyword: ผลเหมือนเดิมทุก bit แต่ hash ฝั่ง server ลด 41–71% ทุก variant · **ผล update บน cloud ทุกชุดก่อนหน้านี้ (รวม Global-MT(v) ของ w3) เทียบกับรอบใหม่ไม่ได้** (`docs/reports/2026-11-15-engine-batched-merkle.md`) |
 | แผน cloud รอบใหม่ (15 พ.ย.) | `PLAN=fill RUN_NAME=paper_fill bash scripts/cloud_worker.sh <1..5>` (ผลอยู่ใน `runs/paper_fill_v/`) · 5 เครื่อง `AMTP_PLACEMENT=fill`: ex4 AMTP + Static-MT ที่ θ = 64 / 128 / 256 เครื่องละ θ · AMTP ที่เหลือ (search1, verify1, tamper, multi-domain, ex3, ex5) 1 เครื่อง · AMTP θ = 64 + Global-MT(v) 1 เครื่อง · baseline และ Global-MT แบบไม่มี v ไม่รันใหม่ |
-| สถานะรอบ fill (16 พ.ย.) | ที่ `869cf73` **ครบแล้วยกเว้น Global-MT(v) ของ worker7** (ยังไม่ได้ดึงผล) · ผลทั้งหมดใน `new_amtp_result/fill_v/` · กราฟเล่าเรื่อง `graph_fill/` · กราฟตามแผน paper `fill_v/figures/` · ex4 AMTP เร็วกว่า Static-MT 13.4× / 11.7× / 9.9× (θ 64 / 128 / 256) · ex3 b = 1,000 insert 14.1 s (เดิม 76.5 s) (`docs/reports/2026-11-16-cloud-gmtv-fill.md`) |
+| สถานะรอบ fill (16 พ.ย.) | ที่ `869cf73` **ครบแล้วยกเว้น Global-MT(v) ของ worker7** (ยังไม่ได้ดึงผล) · ผลครบทุกชุดและกราฟใหม่อยู่ใน `baselines/results/new_new/` (`data/fill/`, `graphs/fill/`) แยกจากผลเดิม · ex4 AMTP เร็วกว่า Static-MT 13.4× / 11.7× / 9.9× (θ 64 / 128 / 256) · ex3 b = 1,000 insert 14.1 s (เดิม 76.5 s) (`docs/reports/2026-11-16-cloud-gmtv-fill.md`) |
 | ข้ามไปก่อน (15 พ.ย.) | จัดไฟล์ตาม keyword (กลัวผิด design) · cache (ยังไม่ตัดสินใจ ถ้าทำต้องทำให้ baseline ด้วย) · AND pruning (future work) · check part เฉพาะไฟล์ผลลัพธ์ (รอถามอาจารย์) |
 
 ---
@@ -142,7 +142,7 @@ Chen ไม่ส่งไฟล์กลับ จึงทดสอบ modify 
 | 128 | 8.9 s | 37.3 s | 4.2× | 128 / 1,027 |
 | 256 | 13.7 s | 37.5 s | 2.7× | 256 / 1,621 |
 
-Global-MT(v) ที่ θ = 64 (ครบ 1,674 batch, w3 commit `089726d`, เร็วต่อ hash ใกล้ w1 ต่างกัน 2.7%): update 66.2 s ต่อ batch (ช้ากว่า AMTP 13.5×) แต่ query เร็วกว่า AMTP (verify 27.3 เทียบ 44.6 ms, server 10.2 เทียบ 15.0 ms) เพราะมี partition เดียว **AMTP ไม่ได้ชนะทุกด้าน** แต่ได้สมดุลที่ดีกว่า: AMTP คุ้มกว่าจนกว่าจะมี query เกิน ~2,800 ครั้งต่อ epoch · กราฟอยู่ใน `graph_op/main/` และ `gamma_with_v/figures/ex4_split_merge/theta_64/` (`docs/reports/2026-11-16-cloud-gmtv-fill.md`)
+Global-MT(v) ที่ θ = 64 (ครบ 1,674 batch, w3 commit `089726d`, เร็วต่อ hash ใกล้ w1 ต่างกัน 2.7%): update 66.2 s ต่อ batch (ช้ากว่า AMTP 13.5×) แต่ query เร็วกว่า AMTP (verify 27.3 เทียบ 44.6 ms, server 10.2 เทียบ 15.0 ms) เพราะมี partition เดียว **AMTP ไม่ได้ชนะทุกด้าน** แต่ได้สมดุลที่ดีกว่า: AMTP คุ้มกว่าจนกว่าจะมี query เกิน ~2,800 ครั้งต่อ epoch · ค่าและกราฟใหม่อยู่ใน `baselines/results/new_new/` แยกจากผลเดิม (`docs/reports/2026-11-16-cloud-gmtv-fill.md`)
 
 **ex5 หลาย domain:** query บน domain เดียวใช้ 4.0 → 4.1 ms จาก 1 ถึง 32 domain (SE-COLLAB 8.9 ms) · update หนึ่ง domain ใช้ 106–112 ms คงที่
 
