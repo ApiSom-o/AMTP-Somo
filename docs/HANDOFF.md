@@ -67,6 +67,8 @@
 | query flags (16 พ.ย., อยู่ใน main แล้ว) | `--and-prune`, `--part-results`, `--and-greedy` (หรือ env `AMTP_AND_PRUNE` / `AMTP_PART_RESULTS` / `AMTP_AND_GREEDY` = 1) ค่าเริ่มต้นปิด · ผลบน Mac และข้อจำกัด: `docs/reports/2026-11-16-and-pruning.md` · ต้องแก้ paper (ASPA eq. 52–57) และให้อาจารย์อนุมัติก่อนใช้ |
 | แผน cloud "prune" (16 พ.ย.) | `PLAN=prune RUN_NAME=paper_prune bash scripts/cloud_worker.sh <1..5>` · 5 เครื่อง เปิดทุก query flag, placement fill, reps 15: 1 = AMTP search1, verify1, tamper, xsearch, xverify, xdomains, exp5 · 2–4 = ex4 AMTP + Static-MT θ 64 / 128 / 256 · 5 = ex4 Global-MT(v) θ 64 · ex3 และ baseline ไม่รันใหม่ (โค้ด update และ baseline ไม่เปลี่ยน) · เริ่มรัน 16 พ.ย. ~11:00 ที่ `767289c` |
 | สถานะรอบ prune (16 พ.ย. 18:00) | **เครื่อง 1 เสร็จแล้ว** ผลอยู่ที่ `runs/cloud/prune_w1/` กราฟอยู่ที่ `baselines/results/new_purn/graphs/` (ex1, ex2, ex5 ใช้ผลรอบนี้ ex3 ใช้ผลรอบ fill) · AND kQ 16 end-to-end 85.7 → 6.5 ms (SE-COLLAB 10.5) · OR และ keyword เดียวไม่ดีขึ้น และ server ช้าลง 4–13% (วัดบน Mac ยืนยันแล้ว) · update ex5 ช้าลง ~20% (เก็บ R^post ตอนสร้าง snapshot) · ex4 เครื่อง 2–5 ยังรัน คาดว่าเสร็จ 19:00–03:00 (`docs/reports/2026-11-16-prune-results.md`) |
+| ex4 รอบ prune (16 พ.ย. 19:30) | เครื่อง 2 (θ 64) และ 3 (θ 128) เสร็จแล้ว ผลอยู่ที่ `runs/cloud/prune_w2/`, `prune_w3/` · update เท่ารอบ fill (AMTP 1.05 / 1.20 s, Static-MT 13.5 / 13.6 s → 12.9× / 11.3×) · query ต่อ batch เร็วขึ้น ~3× ทุก variant (AMTP server 15.9 → 5.3 ms, ตรวจ 35.7 → 12.3 ms ที่ θ 64) · AMTP ยังช้ากว่า Static-MT ตอน query เล็กน้อย (ตรวจ 12.3 เทียบ 10.2 ms) · เครื่อง 4 (θ 256) และ 5 (Global-MT(v)) ยังรัน ยังไม่มีกราฟ ex4 ของรอบนี้ |
+| **วัด search แยกจาก proof (16 พ.ย.)** | อาจารย์ให้แยกการทดลองตามขั้น · โค้ดอยู่ใน `amtp_code/bench_split/` (ไม่แก้ไฟล์เดิม): search ของ server อย่างเดียว 3 แบบ (เต็ม, partition ก่อน, fast = มีดัชนีค้นหาต่อ snapshot) มีจุดตรวจว่าได้ไฟล์ตรงกับ response จริง · **ตกลงกันแล้ว:** (1) รัน `bench_split` บน cloud 1 เครื่อง: search1, xsearch, xdomains, exp5 เปิด flag เหมือนรอบ prune (เก็บทั้ง 3 แบบในรอบเดียว) (2) เอาผลให้อาจารย์ดู โดยเสนอแบบ fast เป็นตัวเลขหลัก (3) ถ้าอาจารย์รับดัชนีค้นหาในการออกแบบ ค่อยใส่ดัชนีใน server จริงเป็น flag `AMTP_SEARCH_INDEX` (ค่าเริ่มต้นปิด) พร้อมตัวจับเวลา search / prep ใน `build_response` แล้วรันชุด search อีกรอบเป็นตัวเลขสุดท้าย ถ้าไม่รับ ใช้แบบ partition ก่อน · ใน paper ใช้ตัวเลข search ชุดเดียว · ยังไม่ได้รันบน cloud (`docs/reports/2026-11-16-search-split-plan.md`) |
 
 ---
 
@@ -270,3 +272,7 @@ Global-MT(v) ที่ θ = 64 (ครบ 1,674 batch, w3 commit `089726d`, เ�
 | #13, #14 | split/merge θ = 128, 256 |
 | #15 | ย้ายผลแบบไม่มี v ไป `old/exp_no_v` |
 | #16 | ตรวจ Merkle เร็วขึ้น 1.2× (hash เท่าเดิม) + แก้ลูปซ้อนที่เหลือใน Validator |
+| #17–#23 | AND pruning, part-results, greedy planner, γ แบบเร็ว, snapshot, ผล new_new, placement fill เป็นค่าเริ่มต้น + แผน cloud "prune" (ดู `docs/reports/2026-11-16-*.md`) |
+| #24 | ผลรอบ prune เครื่อง 1 + กราฟ `new_purn/` + overhead ของ flag |
+| #25, #27 | `amtp_code/bench_split/`: วัด search ของ server แยกจาก proof · แก้หน่วยความจำสะสมก่อนขึ้น cloud |
+| #26 | demo_v2: นับหลักฐานแบบ focus ในหน้า Evidence |
