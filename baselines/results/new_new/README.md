@@ -11,7 +11,8 @@ new_new/
                             เฉพาะแถว Global-MT(v) · ผลดิบอยู่ที่ runs/cloud/w3/paper_v_gmtv/
     fill/                   รอบ "fill" ของ AMTP ครบทุกชุด (commit 869cf73, placement fill)
                             search1, verify1, tamper, xsearch, xverify, xdomains, ex3, ex5,
-                            ex4 θ = 64 / 128 / 256 · ผลดิบอยู่ที่ runs/cloud/fill_w1..fill_w4/
+                            ex4 θ = 64 / 128 / 256 + Global-MT(v) θ = 64 (splitmerge_n100000_t64_gmtv/)
+                            ผลดิบอยู่ที่ runs/cloud/fill_w1..fill_w5/
   graphs/
     main_with_global_mt_v/  ผลหลักเดิม (gamma_with_v) + เส้น Global-MT(v)
       story/                กราฟเล่าเรื่อง (main/ = ด้านที่ชนะ, limits/ = ด้านที่แพ้)
@@ -42,6 +43,7 @@ new_new/
 - **รอบ fill:**
   - AMTP update เร็วกว่า Static-MT 13.4× / 11.7× / 9.9× ที่ θ = 64 / 128 / 256 (ผลหลักเดิมได้ 4.9× / 4.2× / 2.7×)
   - ex3 ที่ b = 1,000: insert 14.1 s (เดิม 76.5 s) และ delete 20.1 s (เดิม 63.6 s)
-- **ยังไม่มี:** Global-MT(v) ของรอบ fill (เครื่อง worker7) ยังไม่ได้ดึงผล กราฟ split/merge ของรอบ fill จึงมีแค่ AMTP กับ Static-MT
+- **Global-MT(v) รอบ fill:** Global-MT(v) ของรอบ fill (เครื่อง amtp-worker7, commit `869cf73`, placement fill, engine ใหม่) ครบ 1,674 batch แล้ว อยู่ที่ `data/fill/splitmerge_n100000_t64_gmtv/` (ผลดิบ `runs/cloud/fill_w5/`) และอยู่ในกราฟ `graphs/fill/` แล้ว: update median ทั้ง stream AMTP 1.1 s · Static-MT 14.8 s (13.4×) · Global-MT(v) 28.5 s (**25.7×**) · query (server + verify, median ทุกจุดวัด) AMTP 51.7 · Static-MT 46.1 · Global-MT(v) 30.0 ms → AMTP คุ้มกว่า Global-MT(v) จนกว่าจะมี query เกิน ~1,260 ครั้งต่อ epoch (Static-MT ~2,450)
+- ตัวเลข Global-MT(v) ของ w3 ข้างบน (66.2 s, 13.5×, ~2,800) มาจากโค้ดก่อนแก้ engine ใช้เทียบได้กับผลหลักเดิม (`main_with_global_mt_v`) เท่านั้น ห้ามเทียบกับรอบ fill
 
 รายละเอียด การตรวจ และวิธีทำกราฟซ้ำ: `docs/reports/2026-11-16-cloud-gmtv-fill.md`
