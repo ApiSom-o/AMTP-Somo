@@ -410,6 +410,50 @@ query ที่ keyword พบบ่อยเร็วขึ้น 1.25–1.9× 
 
 ผลอยู่ที่ `baselines/results/runs/mac_and_prune/snapshot_fix/` (`queries_after_fix/` และ `scripts/` ที่ใช้วัดเวลาและ memory) ค่า RSS ที่วัดรอบแรกใช้ไม่ได้ เพราะ macOS บีบอัดและ swap memory จึงใช้ `tracemalloc` แทน
 
+## Smoke test รวม: เปิดทุก flag (`--and-prune --part-results --and-greedy`, commit `e444030`)
+
+Mac, D1, N = 100k, median ทุกค่า baseline ใช้ผลเดิมใน `search1/` และ `xsearch/` (เครื่องเดียวกัน)
+
+**Search 1.1, end-to-end (ms):**
+
+| kQ | AMTP เดิม | **AMTP เปิดทุก flag** | SE-COLLAB | Chen | Du |
+|---|---|---|---|---|---|
+| 1 | 0.16 | 0.17 | 7.45 | **0.09** | 0.20 |
+| 2 | 0.64 | 0.25 | 7.39 | 0.49 | **0.22** |
+| 5 | 2.42 | 0.45 | 7.42 | 1.27 | **0.41** |
+| 10 | 10.53 | 0.79 | 7.51 | 3.04 | **0.71** |
+| 15 | 10.04 | 1.08 | 7.56 | 3.76 | **1.02** |
+| 20 | 17.62 | 1.45 | 7.61 | 5.52 | **1.35** |
+
+**Search 1.1, proof (byte):**
+
+| kQ | AMTP เดิม | **AMTP เปิดทุก flag** | SE-COLLAB | Chen | Du |
+|---|---|---|---|---|---|
+| 1 | 1,660 | 1,668 | 842 | 32 | 5,250 |
+| 5 | 42,692 | 5,520 | 561 | 160 | 3,500 |
+| 10 | 175,700 | 10,288 | 561 | 320 | 3,500 |
+| 20 | 301,512 | 19,560 | 561 | 640 | 3,500 |
+
+- **ดีขึ้นจาก AMTP เดิม (kQ = 20):** end-to-end เร็วขึ้น 12×, proof เล็กลง 15×, verify 14.06 → 0.77 ms, server 3.42 → 0.47 ms
+- **ชนะ:** SE-COLLAB ทุก kQ และ Chen ที่ kQ ≥ 2
+- **แพ้:** Du เล็กน้อยที่ kQ ≥ 2 (1.45 เทียบ 1.35 ms ที่ kQ = 20), Chen ที่ kQ = 1, proof ใหญ่กว่าทุก baseline ที่ kQ ≥ 2
+
+**Search 2.1 cross-domain (4 × 25k):**
+
+| kQ | end-to-end AMTP เดิม / prune / **ทุก flag** / SE-COLLAB (ms) | proof AMTP เดิม / prune / **ทุก flag** / SE-COLLAB (byte) |
+|---|---|---|
+| 2 | 2.15 / 1.03 / **0.93** / 7.37 | 27,540 / 11,812 / **9,208** / 990 |
+| 4 | 8.09 / 1.60 / **1.60** / 7.57 | 112,380 / 17,644 / **15,176** / 990 |
+| 8 | 22.31 / 2.98 / **2.68** / 7.81 | 311,356 / 33,228 / **29,452** / 1,485 |
+| 16 | 43.23 / 5.54 / **4.98** / 8.15 | 581,540 / 67,296 / **57,436** / 2,475 |
+
+- ชนะ SE-COLLAB ด้าน end-to-end ทุก kQ, เร็วกว่า AMTP เดิม 8.7× ที่ kQ = 16, ดีกว่า prune อย่างเดียว 10–15%
+- แพ้ SE-COLLAB ด้าน verify ที่ kQ ≥ 8 (2.35 เทียบ 0.80 ms ที่ kQ = 16) และด้าน proof ทุก kQ (9–23×)
+
+**Tamper (D1, "machine learning", rQ = 2,021, 3 รอบต่อจุด):** none ไม่มี false alarm (0/3), modify / old_version จับได้ 3/3 ที่ ct, hide / inject จับได้ 3/3 ที่ comp ทุกขนาด 5–1,000 และระบุไฟล์ที่ถูกแก้ได้ครบ verify ประมาณ 23–29 ms
+
+manifest บันทึก `git_dirty: true` เพราะ working tree มี `plot_*.py` ที่แก้ค้างไว้ ไม่ใช่โค้ด AMTP ถ้าจะใช้ใน paper ควรรันซ้ำจาก tree สะอาด
+
 ## ข้อจำกัด (ต้องบอกใน paper ถ้าใช้)
 
 1. **ได้ผลดีเพราะลักษณะของ query ชุดนี้:** query สร้างจากไฟล์ต้นทาง keyword ที่หายากที่สุดจึงมีประมาณ 1 ไฟล์ ถ้าทุก keyword มีไฟล์เยอะ ต้นทุนจะโตตาม |L_min| ซึ่งเป็นขอบล่างตามธรรมชาติของการพิสูจน์ AND วัดจริงแล้วในหัวข้อ "query ที่ keyword ทุกตัวพบบ่อย" ถ้าทุก keyword มี df ≥ 200 AMTP + pruning แพ้ทุก baseline
@@ -424,6 +468,7 @@ query ที่ keyword พบบ่อยเร็วขึ้น 1.25–1.9× 
 `baselines/results/runs/mac_and_prune/`
 - `search1/{base,prune,secollab,chen,du}/` ผล Search 1.1 (D1, N = 100k)
 - `xsearch/{base,prune,secollab}/` ผล Search 2.1 cross-domain (4 × 25k)
+- `all_flags/{s1,x,tamper}/` smoke test รวมแบบเปิดทุก flag (commit `e444030`)
 
 manifest ทุกไฟล์บันทึก `git_commit: 433c781` และ `git_dirty: true` เพราะรันจาก working tree ที่ยังไม่ได้ commit โค้ดที่ใช้รันคือโค้ดใน commit ของรายงานนี้ ส่วน `amtp_and_prune` บอกว่ารอบไหนเปิด flag
 
