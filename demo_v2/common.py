@@ -170,3 +170,18 @@ def add_cors(app):
 
 def ns_ms(ns):
     return round(ns / 1e6, 3)
+
+
+def ev_counts(e):
+    """What one keyword's evidence carries, for the panels (display only; DataUser.verify decides).
+    Full evidence lists every partition of the keyword in L as (PID, component). Focus evidence (AND pruning,
+    amtp/server.py _focus_evidence) sends only the components inside the focus set (segs, as
+    [position, PID, component]) plus the adjacent γ leaves that prove absence from the other focus partitions
+    (nb); n_sel is the number of partitions the keyword has."""
+    if e.get("mode") == "focus":
+        segs = e.get("segs", [])
+        return {"partitions": len(segs), "entries": sum(len(c) for _, _, c in segs), "pruned": True,
+                "neighbours": len(e.get("nb", [])), "of": e.get("n_sel")}
+    L = e.get("L", [])
+    return {"partitions": len(L), "entries": sum(len(c) for _, c in L), "pruned": False,
+            "neighbours": 0, "of": len(L)}

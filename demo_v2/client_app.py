@@ -13,7 +13,7 @@ from collections import Counter
 
 import common
 from common import (BUCKETS, OPS_PER_EPOCH, POLICY, STAND_INS, THETA_MAX, THETA_MIN, RemoteError, get, http,
-                    ns_ms, pack, post, show, unpack)
+                    ev_counts, ns_ms, pack, post, show, unpack)
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -343,8 +343,7 @@ class Client:
             "domain_proof_hashes": len(dom.get("proof", [])),
             "evidence_total": len(ev),
             "evidence": [{"word": ctx["word_of"].get(e.get("h"), "?"), "h": str(e.get("h"))[:16],
-                          "status": e.get("status"), "partitions": len(e.get("L", [])),
-                          "entries": sum(len(c) for _, c in e.get("L", [])),
+                          "status": e.get("status"), **ev_counts(e),
                           "imt_pos": e.get("pos", (e.get("lo") or {}).get("pos")),
                           "bracket": None if e.get("status") != "absent" else {
                               "lo": e["lo"]["h"][:16], "next": e["lo"]["next"][:16]},
