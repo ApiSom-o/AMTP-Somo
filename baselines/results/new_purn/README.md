@@ -11,13 +11,16 @@
 | เส้น AMTP ใน ex1 (search), ex2 (verify), ex5 (หลาย domain) และ story ทั้ง 5 รูป | **รอบ prune** เครื่อง 1 · ผลดิบ `runs/cloud/prune_w1/paper_prune_v/amtp/` | ✅ |
 | เส้น AMTP ใน ex3 (update) | รอบ fill (`new_new/data/fill/`, commit `869cf73`) · ไม่รันใหม่ เพราะโค้ด update ไม่เปลี่ยน | – |
 | เส้น baseline (SE-COLLAB, Chen, Du) ทุกรูป | `new_amtp_result/gamma_with_v/` · ไม่รันใหม่ เพราะโค้ด baseline ไม่เปลี่ยน | – |
-| ex4 (split / merge) | **ยังไม่มี** รอเครื่อง 2–5 ของรอบ prune | – |
+| ex4 (split / merge) AMTP + Static-MT | **รอบ prune** เครื่อง 2 / 3 / 4 (θ 64 / 128 / 256) · `runs/cloud/prune_w{2,3,4}/` | ✅ |
+| ex4 Global-MT(v) | **ยังไม่มี** รอเครื่อง 5 ของรอบ prune (คาดว่าเสร็จ 17 พ.ย. ~03:00) จึงยังไม่มีเส้นนี้ในรูป ex4 | – |
 
 ```
 new_purn/graphs/
-  paper/   25 รูป + figure_points.csv   ex1_search, ex2_verify, ex3_update, ex5_multidomain
-  story/   5 รูป (story/main/)           กราฟเล่าเรื่องที่เหลือต้องใช้ ex4
+  paper/   39 รูป + figure_points.csv   ex1_search, ex2_verify, ex3_update, ex4_split_merge, ex5_multidomain
+  story/   main/ 7 รูป, limits/ 1 รูป
 ```
+
+**story/limits ไม่ครบ:** `plot_story.py` หยุดที่รูป `e2e_vs_files` เพราะข้อความหัวรูปเขียนไว้ว่า "SE-COLLAB แซง AMTP ที่ ~Xk ไฟล์" แต่รอบ prune AMTP ชนะทุกขนาด จึงไม่มีจุดตัด (ไม่ได้แก้ `plot_story.py` ซึ่งเป็นโค้ดเดิม) รูป `e2e_vs_files`, `server_vs_files`, `e2e_vs_kq` ของ story จึงยังไม่มี ข้อมูลชุดเดียวกันอยู่ใน `paper/ex1_search/Search_1.1`, `Search_1.2` แล้ว
 
 ## ข้อควรรู้
 
@@ -30,9 +33,10 @@ new_purn/graphs/
 R=baselines/results/new_amtp_result; T=$(mktemp -d); mkdir $T/amtp
 for f in baselines/results/runs/cloud/prune_w1/paper_prune_v/amtp/*; do ln -s $PWD/$f $T/amtp/; done
 for f in baselines/results/new_new/data/fill/amtp_exp3_dynamic_update.*; do ln -s $PWD/$f $T/amtp/; done
+for w in 2 3 4; do for f in baselines/results/runs/cloud/prune_w$w/paper_prune_v/amtp/splitmerge_*; do ln -s $PWD/$f $T/amtp/; done; done
 for s in secollab chen du; do ln -s $PWD/$R/gamma_with_v/$s $T/$s; done
 .venv/bin/python baselines/plot_paper.py $T --out baselines/results/new_purn/graphs/paper
-.venv/bin/python baselines/plot_story.py --run $T --out baselines/results/new_purn/graphs/story   # หยุดที่รูป ex4 (ยังไม่มีข้อมูล)
+.venv/bin/python baselines/plot_story.py --run $T --out baselines/results/new_purn/graphs/story   # หยุดที่รูป e2e_vs_files (ดูข้างบน)
 ```
 
 รายละเอียดและตัวเลข: `docs/reports/2026-11-16-prune-results.md`

@@ -1,0 +1,9 @@
+commit 00f9d42, uncommitted changes: 0
+run paper_split  reps 15  warmup 3  flags: placement fill, and_prune, part_results, and_greedy
+[2026-11-16 12:47:06] start pytest
+[2026-11-16 12:47:50] done  pytest (44 s)
+[2026-11-16 12:47:50] start search1
+[2026-11-16 13:56:42] done  search1 (4132 s)
+[2026-11-16 13:56:42] start xsearch
+[2026-11-16 14:23:59] done  xsearch (1637 s)
+[2026-11-16 14:23:59] start xdomains

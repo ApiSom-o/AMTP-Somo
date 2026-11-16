@@ -278,4 +278,5 @@ Global-MT(v) ที่ θ = 64 (ครบ 1,674 batch, w3 commit `089726d`, เ�
 | #25, #27 | `amtp_code/bench_split/`: วัด search ของ server แยกจาก proof · แก้หน่วยความจำสะสมก่อนขึ้น cloud |
 | #26 | demo_v2: นับหลักฐานแบบ focus ในหน้า Evidence |
 | #28 | ผล ex4 รอบ prune θ 64 / 128 + สคริปต์ cloud + ข้อตกลงเรื่องวัด search |
-| (PR ถัดไป) | ผล ex4 θ 256 รอบ prune · เลือกแบบ partition ก่อน · สรุปรวมทุกการแก้ (`2026-11-16-summary-all-changes.md`) |
+| #29 | ผล ex4 θ 256 รอบ prune · เลือกแบบ partition ก่อน · สรุปรวมทุกการแก้ (`2026-11-16-summary-all-changes.md`) |
+| (PR ถัดไป) | ผล search อย่างเดียวบน cloud: search1, xsearch + กราฟ `baselines/results/search_split/` (`2026-11-16-search-split-partial.md`) |
