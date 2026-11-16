@@ -366,7 +366,10 @@ def _grow_full(b_q, postings, sel, size, full, data_key):
     costs its whole list but shrinks F (boolean.focus is an intersection under AND), so every other partial
     keyword opens fewer components. Each candidate is scored with set operations only; the other keywords'
     focus cost is scaled by |F'| / |F| (independence estimate). The user's check is unchanged: it already
-    accepts any set of full keywords that bounds F."""
+    accepts any set of full keywords that bounds F.
+    No repeated work: candidates are ordered once, the other keywords' cost is one sum per round, and for a
+    flat AND F is narrowed by intersection (focus of a flat AND is the intersection of the full lists) instead
+    of being recomputed from every full list; a nested query recomputes F with boolean.focus."""
     present = [h for h, p in postings.items() if p is not None]
 
     def partial_cost(h, F):
@@ -375,29 +378,35 @@ def _grow_full(b_q, postings, sel, size, full, data_key):
         return min(_focus_cost(len(s), k, round(k * size[h] / len(s)), len(F) - k),
                    _full_bytes(len(s), size[h]))
 
+    flat_and = b_q[0] == "AND" and all(c[0] == "leaf" for c in b_q[1])
+
+    def narrowed(F, c):
+        return F & sel[c] if flat_and else boolean.focus(b_q, {h: sel[h] for h in full | {c}})
+
     full = set(full)
     F = boolean.focus(b_q, {h: sel[h] for h in full})
     if F is None or len(F) <= _GREEDY_MIN_FOCUS:   # already small: another full list cannot pay for itself
         return full
+    order = sorted(present, key=lambda h: (len(sel[h]), size[h], data_key((sel[h], {h}))))
     while F:
-        partial = [h for h in present if h not in full]
+        partial = [h for h in order if h not in full]
         if not partial:
             break
         costs = {h: partial_cost(h, F) for h in partial}
+        total = sum(costs.values())                # integers: total - costs[c] is exact
         best, best_gain = None, 0
-        for c in sorted(partial, key=lambda h: (len(sel[h]), size[h], data_key((sel[h], {h})))):
-            F2 = boolean.focus(b_q, {h: sel[h] for h in full | {c}})
+        for c in partial:
+            F2 = narrowed(F, c)
             if F2 is None:
                 continue
             shrink = len(F2) / len(F)
-            gain = (sum(costs[h] for h in partial if h != c) * (1 - shrink)
-                    - (_full_bytes(len(sel[c]), size[c]) - costs[c]))
+            gain = (total - costs[c]) * (1 - shrink) - (_full_bytes(len(sel[c]), size[c]) - costs[c])
             if gain > best_gain:
                 best, best_gain = c, gain
         if best is None:
             break
+        F = narrowed(F, best)
         full.add(best)
-        F = boolean.focus(b_q, {h: sel[h] for h in full})
     return full
 
 
