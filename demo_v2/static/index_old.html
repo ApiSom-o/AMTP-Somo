@@ -164,6 +164,10 @@ footer{padding:0 20px 24px}
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num = n => n == null ? "—" : Number(n).toLocaleString("en-US");
+// partitions of one keyword's evidence; a pruned keyword (AND pruning, focus evidence) sends only the partitions
+// inside the focus set, plus the neighbouring γ leaves that prove it is absent from the other focus partitions
+const evParts = x => x.pruned ? `${num(x.partitions)} of ${num(x.of)}<div class="small muted">pruned · ${num(x.neighbours)} neighbour γ</div>` : num(x.partitions);
+const evPill = x => x.pruned ? ` <span class="pill na" title="AND pruning: only the part of this keyword's posting list that the other keywords allow is sent">pruned</span>` : "";
 const ms = v => v == null ? "—" : (v < 10 ? v.toFixed(3) : v < 100 ? v.toFixed(2) : v.toFixed(1)) + " ms";
 const hx = (s, n = 16) => s ? `<span class="mono" title="${esc(s)}">${esc(String(s).slice(0, n))}…</span>` : "—";
 const kb = b => b == null ? "—" : b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(1) + " KB" : (b / 1048576).toFixed(2) + " MB";
@@ -269,8 +273,8 @@ function renderProof() {
   h += `<h3>Evidence per keyword${p.evidence_total > p.evidence.length ? ` (first ${p.evidence.length} of ${p.evidence_total})` : ""}</h3><div class="scroll"><table><thead><tr>
     <th>Keyword (known only here)</th><th>Token h_w</th><th>Status</th><th class="num">Partitions</th><th class="num">Entries</th><th class="num">Tree path</th></tr></thead><tbody>` +
     p.evidence.map(e => `<tr><td>${esc(e.word)}</td><td>${hx(e.h, 10)}</td>
-      <td><span class="pill ${e.status === "present" ? "ok" : e.status === "absent" ? "warn" : "bad"}">${esc(e.status)}</span>${e.bracket ? `<div class="small muted">non-membership: ${hx(e.bracket.lo, 8)} &lt; h_w &lt; ${hx(e.bracket.next, 8)}</div>` : ""}</td>
-      <td class="num">${num(e.partitions)}</td><td class="num">${num(e.entries)}</td>
+      <td><span class="pill ${e.status === "present" ? "ok" : e.status === "absent" ? "warn" : "bad"}">${esc(e.status)}</span>${evPill(e)}${e.bracket ? `<div class="small muted">non-membership: ${hx(e.bracket.lo, 8)} &lt; h_w &lt; ${hx(e.bracket.next, 8)}</div>` : ""}</td>
+      <td class="num">${evParts(e)}</td><td class="num">${num(e.entries)}</td>
       <td class="num" title="${esc((e.siblings || []).join(" "))}">${e.proof_hashes} hashes</td></tr>`).join("") + `</tbody></table></div>`;
   if (p.partitions.length) h += `<h3>Partitions in the proof${p.partitions_touched > p.partitions.length ? ` (first ${p.partitions.length})` : ""}</h3><div class="scroll" style="max-height:170px"><table><thead><tr>
     <th>PID</th><th class="num">Version v</th><th>Root R_P</th><th class="num">Slots</th><th class="num">Position</th><th class="num">Slot proof</th></tr></thead><tbody>` +
@@ -339,8 +343,8 @@ function renderQuery(e) {
       <div><b>${num(e.touched)}</b> of ${num(e.partitions)} partitions touched (${pct.toFixed(1)}%), <b>${num(e.partitions - e.touched)}</b> skipped ·
       domain <b>1</b> of ${e.domains} · ${num(e.files)} files in this domain</div><div class="bar"><i style="width:${pct}%"></i></div>
       <h3>3 · Search</h3><div class="scroll" style="max-height:120px"><table><thead><tr><th>Key</th><th>Found</th><th class="num">Partitions</th><th class="num">Encrypted entries</th></tr></thead><tbody>` +
-      e.evidence.slice(0, 24).map(x => `<tr><td class="mono">${esc(x.h)}</td><td><span class="pill ${x.status === "present" ? "ok" : "warn"}">${esc(x.status)}</span></td>
-        <td class="num">${x.partitions}</td><td class="num">${num(x.entries)}</td></tr>`).join("") + `</tbody></table></div>
+      e.evidence.slice(0, 24).map(x => `<tr><td class="mono">${esc(x.h)}</td><td><span class="pill ${x.status === "present" ? "ok" : "warn"}">${esc(x.status)}</span>${evPill(x)}</td>
+        <td class="num">${evParts(x)}</td><td class="num">${num(x.entries)}</td></tr>`).join("") + `</tbody></table></div>
       <div class="small" style="margin-top:4px"><b>${num(e.results)}</b> matching encrypted file(s) returned</div>
       <h3>4 · Proof built</h3>${tree(e)}
       <div class="small">proof ${kb(e.proof_bytes)} · response ${kb(e.response_bytes)} · one domain multiproof of ${e.tree.domain_proof_hashes} hash(es)</div>`;

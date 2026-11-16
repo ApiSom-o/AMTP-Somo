@@ -9,7 +9,7 @@ import threading
 import time
 
 import common  # noqa: F401
-from common import BUCKETS, EventHub, add_cors, ns_ms, pack, unpack
+from common import BUCKETS, EventHub, add_cors, ev_counts, ns_ms, pack, unpack
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI, HTTPException, WebSocket
 
@@ -141,9 +141,7 @@ def create_app():
                 resp, st = out["response"], server.current(t_q["domain"])
                 ev = resp["proof"]["evidence"]
                 event.update(
-                    evidence=[{"h": e["h"][:8] + "…", "status": e["status"],
-                               "partitions": len(e.get("L", [])),
-                               "entries": sum(len(c) for _, c in e.get("L", []))} for e in ev],
+                    evidence=[{"h": e["h"][:8] + "…", "status": e["status"], **ev_counts(e)} for e in ev],
                     touched=len(resp["proof"]["partitions"]), partitions=len(st.partitions),
                     domains_touched=1, domains=len(server.engines), files=len(st.loc),
                     results=len(resp["R_ct"]), proof_bytes=W.amtp_proof_bytes(resp["proof"]),
