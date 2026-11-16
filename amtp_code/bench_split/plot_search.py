@@ -1,0 +1,136 @@
+"""Search-only figures (line charts) from a bench_split run, next to the baselines' own search time.
+
+    python -m bench_split.plot_search --amtp <run>/amtp --out ../baselines/results/search_split/graphs
+        [--base ../baselines/results/new_amtp_result/gamma_with_v]   # SE-COLLAB, Chen, Du (not re-run)
+
+y = server search time without any proof (ms), per scheme:
+    AMTP                 server_search_fetch        lookup + file sets + Boolean evaluation + fetch (whole posting lists)
+    AMTP (search index)  server_search_fast_fetch   the same on the search index, partition first (bench_split)
+    SE-COLLAB            search_core                BPL retrieval + Boolean evaluation + result fetch (its own split)
+    Chen, Du             server_total               their server does only the search (Du: the slowest cloud)
+One more figure per suite shows AMTP's server time split: search (index) vs the whole server time (search + proof).
+Uses the drawing helpers of baselines/plot_paper.py (unchanged). Every plotted number goes to figure_points.csv.
+"""
+import argparse
+import csv
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+BASELINES = os.path.normpath(os.path.join(HERE, "..", "..", "baselines"))
+sys.path.insert(0, BASELINES)
+import plot_paper as P  # noqa: E402
+
+AMTP_SERIES = [("server_search_fetch", "AMTP", "-"), ("server_search_fast_fetch", "AMTP (search index)", "--")]
+BASE_COL = {"secollab": "search_core", "chen": "server_total", "du": "server_total"}
+YLABEL = "Server search time, without proof (ms)"
+
+
+def rows_of(folder, scheme, suite):
+    path = os.path.join(folder, f"{scheme}_{suite}.csv")
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return [r for r in csv.DictReader(f) if r.get("status", "ok") == "ok"]
+
+
+def draw(fig_id, ax, amtp, base, key):
+    color, marker = P.STYLE["amtp"]
+    for col, label, ls in AMTP_SERIES:
+        P.line(ax, fig_id, P.agg(amtp, key, col + "_ms_median"), label, color, marker, ls)
+    for s, rs in base.items():
+        P.scheme_line(ax, fig_id, s, P.agg(rs, key, BASE_COL[s] + "_ms_median"))
+
+
+def split_fig(fig_id, path, title, fixed, xlabel, amtp, key, ticks, log_x=False):
+    """AMTP only: search (index) vs the whole server time (search + proof)."""
+    f, ax = P.fig()
+    color, marker = P.STYLE["amtp"]
+    P.line(ax, fig_id, P.agg(amtp, key, "server_total_ms_median"), "AMTP server: search + proof", color, marker)
+    P.line(ax, fig_id, P.agg(amtp, key, "server_search_fast_fetch_ms_median"), "AMTP server: search only (index)",
+           color, marker, "--")
+    P.save(f, ax, path, title, fixed, xlabel, "Server time (ms)", log_x=log_x, ticks=ticks)
+
+
+def search1(amtp_dir, base_dir, out):
+    amtp = rows_of(amtp_dir, "amtp", "search_single")
+    if not amtp or "server_search_fetch_ms_median" not in amtp[0]:
+        return
+    base = {s: rows for s in BASE_COL if (rows := rows_of(os.path.join(base_dir, s), s, "search_single"))}
+    ns = sorted({int(r["N"]) for r in amtp})
+    by_n = {n: {int(r["kQ"]) for r in amtp if int(r["N"]) == n} for n in ns}
+    n_fix = max(ns, key=lambda n: (len(by_n[n]), n))
+    kq_fix = max(sorted({int(r["kQ"]) for r in amtp}), key=lambda k: (sum(1 for n in ns if k in by_n[n]), -k))
+    doms = P.one([r["domain"] for r in amtp], "domain")
+    at_n = lambda rs: [r for r in rs if int(r["N"]) == n_fix]                         # noqa: E731
+    at_k = lambda rs: [r for r in rs if int(r["kQ"]) == kq_fix]                       # noqa: E731
+    f, ax = P.fig()
+    draw("S1.1_search_only", ax, at_n(amtp), {s: at_n(r) for s, r in base.items()}, lambda r: int(r["kQ"]))
+    P.save(f, ax, os.path.join(out, "Search_1.1", "search_only_vs_kQ"), "Search 1.1 · single domain · vary keywords",
+           f"{n_fix:,} files per domain · AND query · median over domains {doms}", "Keywords in the AND query $k_Q$",
+           YLABEL, ticks=sorted(by_n[n_fix]))
+    if len(ns) > 1:
+        f, ax = P.fig()
+        draw("S1.2_search_only", ax, at_k(amtp), {s: at_k(r) for s, r in base.items()}, lambda r: int(r["N"]))
+        P.save(f, ax, os.path.join(out, "Search_1.2", "search_only_vs_files"), "Search 1.2 · single domain · vary files",
+               f"$k_Q$ = {kq_fix} · AND query · median over domains {doms}", "Files in the domain", YLABEL,
+               log_x=True, ticks=ns)
+    split_fig("S1.1_amtp_split", os.path.join(out, "Search_1.1", "amtp_search_vs_server_vs_kQ"),
+              "Search 1.1 · AMTP server time split", f"{n_fix:,} files per domain · AND query · domains {doms}",
+              "Keywords in the AND query $k_Q$", at_n(amtp), lambda r: int(r["kQ"]), sorted(by_n[n_fix]))
+
+
+def search21(amtp_dir, base_dir, out):
+    amtp = rows_of(amtp_dir, "amtp", "search_multi")
+    if not amtp or "server_search_fetch_ms_median" not in amtp[0]:
+        return
+    se = rows_of(os.path.join(base_dir, "secollab"), "secollab", "search_multi")
+    nfix = P.one([int(r["N_per_domain"]) for r in amtp], "N")
+    dcount = P.one([int(r["domains"]) for r in amtp], "D")
+    for shape in [s for s in P.SHAPES if any(r["shape"] == s for r in amtp)]:
+        a = [r for r in amtp if r["shape"] == shape]
+        kqs = sorted({int(r["kQ"]) for r in a})
+        f, ax = P.fig()
+        draw(f"S2.1_{shape}_search_only", ax, a, {"secollab": [r for r in se if r["shape"] == shape]} if se else {},
+             lambda r: int(r["kQ"]))
+        P.save(f, ax, os.path.join(out, "Search_2.1", f"search_only_vs_kQ_{shape}"),
+               f"Search 2.1 · multi-domain · {P.SHAPES[shape]}",
+               f"{dcount} domains · {nfix} files per domain · query shape {shape}", "Keywords in the query $k_Q$",
+               YLABEL, ticks=kqs)
+
+
+def search22(amtp_dir, base_dir, out):
+    amtp = rows_of(amtp_dir, "amtp", "domains_scaling")
+    if not amtp or "server_search_fetch_ms_median" not in amtp[0]:
+        return
+    se = rows_of(os.path.join(base_dir, "secollab"), "secollab", "domains_scaling")
+    ds = sorted({int(r["domains"]) for r in amtp})
+    fixed = (f"{P.one([int(r['N_total']) for r in amtp], 'N')} files in total · "
+             f"$k_Q$ = {P.one([int(r['kQ']) for r in amtp], 'kQ')} · shape {P.one([r['shape'] for r in amtp], 's')}")
+    f, ax = P.fig()
+    draw("S2.2_search_only", ax, amtp, {"secollab": se} if se else {}, lambda r: int(r["domains"]))
+    P.save(f, ax, os.path.join(out, "Search_2.2", "search_only_vs_domains"), "Search 2.2 · multi-domain · vary domains",
+           fixed, "Number of domains D", YLABEL, log_x=True, ticks=ds)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--amtp", required=True, help="folder with amtp_search_single.csv etc. of a bench_split run")
+    ap.add_argument("--base", default=os.path.join(BASELINES, "results", "new_amtp_result", "gamma_with_v"),
+                    help="folder with secollab/, chen/, du/ results (default: gamma_with_v, not re-run)")
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    search1(a.amtp, a.base, a.out)
+    search21(a.amtp, a.base, a.out)
+    search22(a.amtp, a.base, a.out)
+    os.makedirs(a.out, exist_ok=True)
+    path = os.path.join(a.out, "figure_points.csv")
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["figure", "series", "x", "y", "err_down", "err_up"])
+        w.writeheader()
+        w.writerows(P.POINTS)
+    print(f"{len(P.POINTS)} points -> {os.path.relpath(path)}")
+
+
+if __name__ == "__main__":
+    main()
