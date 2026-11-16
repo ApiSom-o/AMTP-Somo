@@ -65,7 +65,7 @@
 | ข้ามไปก่อน (15 พ.ย.) | จัดไฟล์ตาม keyword (กลัวผิด design) · cache (เจ้าของงานตัดสินใจไม่ทำ 16 พ.ย.) |
 | **placement หลักของ paper (16 พ.ย.)** | **fill** เป็นวิธีหลัก · ค่าเริ่มต้นของ `bench.experiments` และ `bench.ablation` เปลี่ยนจาก least เป็น fill แล้ว (`AMTP_PLACEMENT=least` ยังเลือกได้) · class `AdaptivePolicy` ยังมีค่าเริ่มต้น least เพื่อให้ test และ demo เดิมไม่เปลี่ยน · ผล Mac ใน `mac_and_prune/` ใช้ least ใช้เทียบผลของ flag ได้ แต่ไม่ใช่ตัวเลข paper (`docs/reports/2026-11-16-fill-default.md`) |
 | query flags (16 พ.ย., อยู่ใน main แล้ว) | `--and-prune`, `--part-results`, `--and-greedy` (หรือ env `AMTP_AND_PRUNE` / `AMTP_PART_RESULTS` / `AMTP_AND_GREEDY` = 1) ค่าเริ่มต้นปิด · ผลบน Mac และข้อจำกัด: `docs/reports/2026-11-16-and-pruning.md` · ต้องแก้ paper (ASPA eq. 52–57) และให้อาจารย์อนุมัติก่อนใช้ |
-| แผน cloud "prune" (16 พ.ย.) | `PLAN=prune RUN_NAME=paper_prune bash scripts/cloud_worker.sh 1` · 1 เครื่อง · AMTP เปิดทุก query flag, placement fill: search1, verify1, tamper, xsearch, xverify, xdomains, exp5 · ex3 / ex4 / baseline / Global-MT(v) ไม่รันใหม่ เพราะโค้ด update ไม่เปลี่ยนตั้งแต่รอบ fill · ยังไม่ได้รัน |
+| แผน cloud "prune" (16 พ.ย.) | `PLAN=prune RUN_NAME=paper_prune bash scripts/cloud_worker.sh <1..5>` · 5 เครื่อง เปิดทุก query flag, placement fill, reps 15: 1 = AMTP search1, verify1, tamper, xsearch, xverify, xdomains, exp5 · 2–4 = ex4 AMTP + Static-MT θ 64 / 128 / 256 · 5 = ex4 Global-MT(v) θ 64 · ex3 และ baseline ไม่รันใหม่ (โค้ด update และ baseline ไม่เปลี่ยน) · ~13 ชม. · ยังไม่ได้รัน |
 
 ---
 
