@@ -380,12 +380,42 @@ query ที่ keyword พบบ่อยเร็วขึ้น 1.25–1.9× 
 
 ผลอยู่ที่ `baselines/results/runs/mac_and_prune/opt12/{fast_gamma,greedy}/` ใช้ query จาก `opt12/queries.jsonl` และรันจาก working tree ที่ยังไม่ได้ commit ทับ `0b55732` manifest จึงบันทึก `git_dirty: true`
 
+## เพิ่มเติม: เวลาและ memory ของการสร้าง snapshot
+
+**ทำไมต้องวัด:** ex3 ไม่ได้นับเวลาสร้าง snapshot (`finalize_update(..., snapshot=False)`) แต่ในระบบจริง server สร้าง snapshot ใหม่ทุก epoch เพื่อตอบ query ถ้าจะเปิด `--and-prune` จึงต้องรู้ราคาส่วนนี้
+
+**ก่อนแก้ (D1, 100k):** เปิด `--and-prune` แล้วสร้าง snapshot ช้าลงจาก 22.1 s เป็น 36.3 s (+64%) ทั้งที่จำนวน hash เท่ากัน (12,611,038) วัดที่ 50k ด้วย `tracemalloc` พบว่า memory เพิ่ม +77% (521 → 924 MB)
+
+**ต้นเหตุ (วัดแล้ว):** snapshot เก็บ R^post tree และ list ของ H(Enc(L)) ไว้สำหรับ**ทุก** keyword (1.08 ล้านตัวที่ 100k) cyclic GC ของ Python จึงต้องไล่ object เหล่านี้ซ้ำไปมาระหว่างสร้าง ถ้าปิด GC ระหว่างสร้าง (50k) ส่วนที่ช้าเพิ่มจะเหลือ +5.5% แทน +26%
+
+**แก้ (`index.py`, `server.py`):**
+1. **ปิด cyclic GC ชั่วคราวระหว่าง `DomainState._build()`:** snapshot มีแค่ dict, list และ bytes ที่ไม่มี reference วนกัน memory ยังถูกคืนด้วย reference counting ตามปกติ ข้อนี้ใช้กับทุกโหมด รวมทั้งตอนปิด flag
+2. **เก็บข้อมูล R^post ไว้เฉพาะ keyword ที่มีตั้งแต่ `KEEP_MIN_PARTS = 3` partition:** keyword ที่เล็กกว่านั้นคำนวณตอน query (ไม่กี่ hash และไม่เก็บไว้ จึงไม่ใช่ cache)
+3. **ข้ามการสร้าง focus evidence ของ keyword เล็กเมื่อแบบเต็มไม่มีทางใหญ่กว่า (`_full_is_no_larger`):** ใช้ lower bound ของขนาดแบบ focus ผลการเลือกจึงเหมือนเดิมทุก byte (test `test_full_list_shortcut_never_changes_the_choice`)
+
+**ผลหลังแก้:**
+
+| N | flag | เวลาสร้าง (median ของ 3 ครั้ง) | memory ของ snapshot (tracemalloc) | keyword ที่เก็บ tree |
+|---|---|---|---|---|
+| 50k | ปิด | 10.69 → **8.26 s** | 521 MB | 0 |
+| 50k | เปิด | 13.48 → **8.34 s** | 924 → **639 MB** | 42,366 / 563,581 |
+| 100k | ปิด | 22.1 → **16.9 s** | 1,030 MB | 0 |
+| 100k | เปิด | 36.3 → **17.1 s** | **1,279 MB** | 82,995 / 1,082,038 |
+
+- **ราคาของ `--and-prune` เหลือ:** เวลาสร้าง snapshot +1–2% และ memory +23–24%
+- **ตอนปิด flag ก็เร็วขึ้น 23–24%:** เพราะได้ผลจากการปิด GC
+- **query (440 ตัว, เปิดทุก flag):** proof เหมือนรอบก่อนแก้ทุก byte (0/440 ต่าง) เวลาเท่าเดิมหรือดีขึ้นเล็กน้อย เช่น Search 1.1 kQ = 20: 1.42 → 1.41 ms และ df ≥ 1,000 kQ = 20: 41.94 → 40.94 ms
+- **รอบกลางที่ยังไม่มี shortcut ข้อ 3:** Search 1.1 kQ = 20 ช้าลงเป็น 1.55 ms จึงเพิ่มข้อ 3
+- **test ทั้งชุด:** ปิด flag 514 passed · เปิดทุก flag 512 passed, 2 skipped
+
+ผลอยู่ที่ `baselines/results/runs/mac_and_prune/snapshot_fix/` (`queries_after_fix/` และ `scripts/` ที่ใช้วัดเวลาและ memory) ค่า RSS ที่วัดรอบแรกใช้ไม่ได้ เพราะ macOS บีบอัดและ swap memory จึงใช้ `tracemalloc` แทน
+
 ## ข้อจำกัด (ต้องบอกใน paper ถ้าใช้)
 
 1. **ได้ผลดีเพราะลักษณะของ query ชุดนี้:** query สร้างจากไฟล์ต้นทาง keyword ที่หายากที่สุดจึงมีประมาณ 1 ไฟล์ ถ้าทุก keyword มีไฟล์เยอะ ต้นทุนจะโตตาม |L_min| ซึ่งเป็นขอบล่างตามธรรมชาติของการพิสูจน์ AND วัดจริงแล้วในหัวข้อ "query ที่ keyword ทุกตัวพบบ่อย" ถ้าทุก keyword มี df ≥ 200 AMTP + pruning แพ้ทุก baseline
 2. **OR ไม่ได้ลด:** AND-of-OR และ OR-of-AND ลดได้บางส่วน แต่ยังไม่ได้วัด (Search 2.1)
 3. **ตัวเลขเป็นของ Mac ไม่ใช่ cloud:** baseline (SE-COLLAB, Chen, Du) วัดบน cloud จึงยังเทียบตรงๆ ไม่ได้ ต้องรัน baseline บนเครื่องเดียวกัน หรือรัน AMTP `--and-prune` บน cloud
-4. **server ใช้ memory เพิ่ม:** เก็บ R^post tree ของทุก keyword ใน snapshot เมื่อเปิด flag (Engine เก็บ tree ชุดนี้อยู่แล้ว ส่วนที่เพิ่มคือสำเนาใน snapshot) ยังไม่ได้วัดว่าเพิ่มเท่าไร
+4. **server ใช้ memory เพิ่ม:** เมื่อเปิด flag snapshot ใช้ memory เพิ่ม +23–24% (100k: 1,030 → 1,279 MB) และเวลาสร้าง snapshot เพิ่ม +1–2% ดูหัวข้อ "เวลาและ memory ของการสร้าง snapshot"
 5. **slot multiproof อาจใหญ่ขึ้นเล็กน้อย:** ใน partition ที่เปิด slot น้อยลง ต้องใช้ sibling hash มากขึ้น ใน test เล็กเจอกรณี +80 B แต่ในผลวัดจริงไม่มี query ไหนที่ proof ใหญ่ขึ้น
 6. **ต้องแก้ paper และให้อาจารย์อนุมัติ:** ส่วน ASPA (eq. 52–57) และ proof ของ theorem ต้องเพิ่มรูปแบบ focus, ข้ออ้างเรื่องลำดับ PID ที่ Validator รับประกัน และกฎ focus
 

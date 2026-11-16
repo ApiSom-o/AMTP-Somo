@@ -5,6 +5,7 @@ DomainState is the Cloud Server's read-only query snapshot of one finalized epoc
 transition on its dirty paths; Engine.snapshot() then rebuilds this snapshot in full and the
 server checks that its R_D equals the incremental one.
 """
+import gc
 import hashlib
 import os
 import re
@@ -178,6 +179,9 @@ def imt_next(keys) -> dict:
     return {order[i]: order[i + 1] for i in range(len(order) - 1)}
 
 
+KEEP_MIN_PARTS = 3      # AND pruning: keep R^post data for keywords in at least this many partitions
+
+
 class DomainState:
     """One finalized snapshot of a domain at one epoch."""
 
@@ -187,7 +191,16 @@ class DomainState:
         self.partitions = partitions            # ordered: position in partition tree
         self.fwd = fwd                          # cid -> set of keyword keys h
         self.imt_layout = imt_layout            # IMT position -> key h / None (freed); None = sorted
-        self._build()
+        # The build allocates millions of lists and dicts and creates no reference cycles; the cyclic GC would
+        # rescan them over and over (measured: +26% build time with AND pruning, N = 50k). Pause it here;
+        # reference counting still frees everything as usual.
+        paused = gc.isenabled()
+        gc.disable()
+        try:
+            self._build()
+        finally:
+            if paused:
+                gc.enable()
 
     def _build(self):
         # Loc_i: where every cid lives
@@ -219,18 +232,17 @@ class DomainState:
 
         # PAPC per keyword, then the indexed IMT: leaf H(h ‖ ρ ‖ next(h)) at its position
         self.rho = {}
-        # AND pruning only: per keyword, the R^post tree, the inner hashes H(Enc(L_j)) of its components
-        # (the neighbour preimages of a focus proof) and its number of postings. Index data built with the
-        # snapshot (same work as the γ below), not a cache filled by queries.
+        # AND pruning only: for every keyword in at least KEEP_MIN_PARTS partitions, the R^post tree, the inner
+        # hashes H(Enc(L_j)) of its components (the neighbour preimages of a focus proof) and its number of
+        # postings. Index data built with the snapshot (same work as the γ below), not a cache filled by
+        # queries. Smaller keywords (most of them: the median keyword is in one file) are rebuilt on demand
+        # in a few hashes; keeping them would cost several Python objects each.
         self._post_trees, self._post_inner, self._post_count = {}, {}, {}
         keep = and_prune_on()
         for h, L in self.postings.items():
-            if keep:
-                inners = [H(enc_posting(comp)) for _, comp in L]
-                gammas = [gamma_inner(pid, self.by_pid[pid].v, x) for (pid, _), x in zip(L, inners)]
-                tree = MerkleTree(gammas)
-                self._post_trees[h], self._post_inner[h] = tree, inners
-                self._post_count[h] = sum(len(comp) for _, comp in L)
+            if keep and len(L) >= KEEP_MIN_PARTS:
+                tree, inners, count = self._post_parts(L)
+                self._post_trees[h], self._post_inner[h], self._post_count[h] = tree, inners, count
                 r_post = tree.root
             else:
                 r_post = merkle_root([gamma(pid, self.by_pid[pid].v, comp) for pid, comp in L])
@@ -250,30 +262,25 @@ class DomainState:
         self.R_D = domain_root(self.domain, self.epoch, self.R_part, self.R_idx)
 
     def post_tree(self, h: bytes) -> MerkleTree:
-        """The R^post tree of keyword h (γ in PID order). Kept from the build when AND pruning is on,
-        otherwise built here once (and kept) from the snapshot's own postings."""
-        if h not in self._post_trees:
-            self._keep_post(h)
-        return self._post_trees[h]
+        """The R^post tree of keyword h (γ in PID order): kept from the build (AND pruning, keyword in at least
+        KEEP_MIN_PARTS partitions), otherwise rebuilt here from the snapshot's own postings (not kept)."""
+        tree = self._post_trees.get(h)
+        return tree if tree is not None else self._post_parts(self.postings[h])[0]
 
     def post_inner(self, h: bytes) -> list:
         """H(Enc(L_j)) of every component of keyword h, in PID order (see post_tree)."""
-        if h not in self._post_inner:
-            self._keep_post(h)
-        return self._post_inner[h]
+        inner = self._post_inner.get(h)
+        return inner if inner is not None else self._post_parts(self.postings[h])[1]
 
     def post_count(self, h: bytes) -> int:
-        """Number of postings (files) of keyword h (see post_tree)."""
-        if h not in self._post_count:
-            self._keep_post(h)
-        return self._post_count[h]
+        """Number of postings (files) of keyword h."""
+        n = self._post_count.get(h)
+        return n if n is not None else sum(len(comp) for _, comp in self.postings[h])
 
-    def _keep_post(self, h: bytes):
-        L = self.postings[h]
+    def _post_parts(self, L):
         inners = [H(enc_posting(comp)) for _, comp in L]
-        self._post_inner[h] = inners
-        self._post_trees[h] = MerkleTree([gamma_inner(pid, self.by_pid[pid].v, x) for (pid, _), x in zip(L, inners)])
-        self._post_count[h] = sum(len(comp) for _, comp in L)
+        tree = MerkleTree([gamma_inner(pid, self.by_pid[pid].v, x) for (pid, _), x in zip(L, inners)])
+        return tree, inners, sum(len(comp) for _, comp in L)
 
 
 def domain_root(domain: str, epoch: int, r_part: bytes, r_idx: bytes) -> bytes:

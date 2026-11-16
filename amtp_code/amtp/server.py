@@ -13,7 +13,7 @@ from .dht import DHT, StorageError
 from .engine import Engine
 from .update import delta, enc_aff, request_digest
 from .core.hashing import H, TAG_QUERY, enc_bq
-from .index import SENTINEL_LO, and_plan_greedy_on, and_prune_on, part_results_on
+from .index import KEEP_MIN_PARTS, SENTINEL_LO, and_plan_greedy_on, and_prune_on, part_results_on
 
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
     """H(tag ‖ i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η): the message under τ_Q, all fields binary."""
@@ -234,7 +234,8 @@ def build_response(state, b_q, nonce, dht, timing=None):
             pos = state.imt_pos[hb]
             imt_part = {"pos": pos, "next": state.imt_next[hb].hex(), "n": state.imt_n,
                         "proof": [x.hex() for x in state.imt.multiproof([pos])]}
-            ent = _focus_evidence(state, hb, posting, focus_set) if h in pruned else None
+            ent = (_focus_evidence(state, hb, posting, focus_set)
+                   if h in pruned and not _full_is_no_larger(posting, focus_set) else None)
             if ent is not None and _focus_bytes(ent[0]) < _full_bytes(len(posting), state.post_count(hb)):
                 ent, comps = ent
                 evidence.append({"h": h, "status": "present", **ent, **imt_part})
@@ -434,6 +435,20 @@ def _focus_evidence(state, hb: bytes, posting, focus_set):
 
 
 _HASH, _INT = 32, 8       # the size rule of baselines/wire_sizes.py (binary: hash 32 B, number 8 B)
+
+
+def _full_is_no_larger(posting, focus_set) -> bool:
+    """For a keyword in fewer than KEEP_MIN_PARTS partitions (its R^post data is not kept): True when its full
+    list is no larger than ANY focus evidence could be (a lower bound: the fixed fields, its components inside
+    F, and at least one neighbour leaf if it lacks a partition of F). Then the full list is sent without
+    building the focus evidence: the same choice, without rebuilding a tree that would be thrown away."""
+    if len(posting) >= KEEP_MIN_PARTS:
+        return False
+    inside = sum(3 * _INT + len(c) * (_HASH + _INT) for pid, c in posting if pid in focus_set)
+    n_inside = sum(1 for pid, _ in posting if pid in focus_set)
+    fixed = _INT + _HASH + _INT + _INT + _INT        # n_sel, R^post, #segs, #nb, #proof (as _focus_bytes)
+    lower = fixed + inside + (3 * _INT + _HASH if len(focus_set) > n_inside else 0)
+    return _full_bytes(len(posting), sum(len(c) for _, c in posting)) <= lower
 
 
 def _full_bytes(n_comps: int, n_postings: int) -> int:

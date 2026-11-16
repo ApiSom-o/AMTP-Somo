@@ -318,3 +318,20 @@ def test_greedy_planner_answers_are_accepted_and_exact(prune, rich, text):
         assert {o["doc"] for o in user.decrypt(resp) if o["doc"].startswith("S-")} == _truth(words, text)
     finally:
         set_and_plan_greedy(old)
+
+
+def test_full_list_shortcut_never_changes_the_choice(prune, rich):
+    """_full_is_no_larger may only skip the focus evidence when the server would send the full list anyway."""
+    from amtp.server import _focus_bytes, _focus_evidence, _full_bytes, _full_is_no_larger
+    w, _ = rich
+    state = w.server.current("A")
+    checked = 0
+    for hb, posting in state.postings.items():
+        pids = sorted({pid for pid, _ in posting} | {p.pid for p in state.partitions[:3]})
+        for k in range(1, len(pids) + 1):
+            F = set(pids[:k])
+            if _full_is_no_larger(posting, F):
+                ent, _ = _focus_evidence(state, hb, posting, F)
+                assert not _focus_bytes(ent) < _full_bytes(len(posting), sum(len(c) for _, c in posting))
+                checked += 1
+    assert checked > 0
