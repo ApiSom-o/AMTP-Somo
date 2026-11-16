@@ -4,11 +4,12 @@
         [--base ../baselines/results/new_amtp_result/gamma_with_v]   # SE-COLLAB, Chen, Du (not re-run)
 
 y = server search time without any proof (ms), per scheme:
-    AMTP                 server_search_fetch        lookup + file sets + Boolean evaluation + fetch (whole posting lists)
-    AMTP (search index)  server_search_fast_fetch   the same on the search index, partition first (bench_split)
+    AMTP                 server_search_pf_fetch     lookup + boolean.focus (partitions that can match) + file sets in
+                                                    those partitions + Boolean evaluation + fetch; only the server's
+                                                    own structures (the search-index form is not plotted)
     SE-COLLAB            search_core                BPL retrieval + Boolean evaluation + result fetch (its own split)
     Chen, Du             server_total               their server does only the search (Du: the slowest cloud)
-One more figure per suite shows AMTP's server time split: search (index) vs the whole server time (search + proof).
+One more figure per suite shows AMTP's server time split: search only vs the whole server time (search + proof).
 Uses the drawing helpers of baselines/plot_paper.py (unchanged). Every plotted number goes to figure_points.csv.
 """
 import argparse
@@ -21,7 +22,7 @@ BASELINES = os.path.normpath(os.path.join(HERE, "..", "..", "baselines"))
 sys.path.insert(0, BASELINES)
 import plot_paper as P  # noqa: E402
 
-AMTP_SERIES = [("server_search_fetch", "AMTP", "-"), ("server_search_fast_fetch", "AMTP (search index)", "--")]
+AMTP_SERIES = [("server_search_pf_fetch", "AMTP", "-")]     # partition first (boolean.focus): no extra structure
 BASE_COL = {"secollab": "search_core", "chen": "server_total", "du": "server_total"}
 YLABEL = "Server search time, without proof (ms)"
 
@@ -47,7 +48,7 @@ def split_fig(fig_id, path, title, fixed, xlabel, amtp, key, ticks, log_x=False)
     f, ax = P.fig()
     color, marker = P.STYLE["amtp"]
     P.line(ax, fig_id, P.agg(amtp, key, "server_total_ms_median"), "AMTP server: search + proof", color, marker)
-    P.line(ax, fig_id, P.agg(amtp, key, "server_search_fast_fetch_ms_median"), "AMTP server: search only (index)",
+    P.line(ax, fig_id, P.agg(amtp, key, "server_search_pf_fetch_ms_median"), "AMTP server: search only",
            color, marker, "--")
     P.save(f, ax, path, title, fixed, xlabel, "Server time (ms)", log_x=log_x, ticks=ticks)
 
