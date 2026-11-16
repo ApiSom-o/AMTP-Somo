@@ -38,10 +38,15 @@ step() {
 }
 
 step pytest   "$PY" -m pytest -q
+if [ ${#FAILED[@]} -gt 0 ]; then echo "failed: pytest (nothing was measured)"; exit 1; fi
 step search1  "$PY" -m bench_split.run search1  --reps "$REPS" --warmup "$WARMUP" --out "$OUT"
 step xsearch  "$PY" -m bench_split.run xsearch  --reps "$REPS" --warmup "$WARMUP" --out "$OUT"
 step xdomains "$PY" -m bench_split.run xdomains --reps "$REPS" --warmup "$WARMUP" --x-kq 4 --shapes AND --out "$OUT"
-step plot     "$PY" -m bench_split.plot_search --amtp "$OUT" --out "$ROOT/graphs"
+# figures: not a measurement; a failure here (e.g. no matplotlib on the machine) does not fail the run
+if [ ${#FAILED[@]} -eq 0 ] && [ -z "${DRY_RUN:-}" ]; then
+  "$PY" -m bench_split.plot_search --amtp "$OUT" --out "$ROOT/graphs" > "$LOGS/plot.log" 2>&1 \
+    && echo "figures -> $ROOT/graphs" || echo "figures not made (see $LOGS/plot.log); plot later with bench_split.plot_search"
+fi
 
 if [ ${#FAILED[@]} -eq 0 ]; then
   echo "worker done: split"

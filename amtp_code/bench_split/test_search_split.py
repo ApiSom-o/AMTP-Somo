@@ -100,3 +100,17 @@ def test_runner_wraps_run_query_without_changing_bench():
     import bench_split.run as R
     assert R._full_query is original                            # the unchanged full query is what it calls
     assert E.run_query is original                              # importing does not patch; only main() does
+
+
+def test_index_is_dropped_with_its_snapshot():
+    """The suites free a snapshot after each size; the runner's index cache must not keep it alive."""
+    import gc
+    import bench_split.run as R
+    state, _ = _state(7)
+    R._INDEX.clear()
+    R._index_for(state, "A")
+    assert R._index_for(state, "A") is R._INDEX[id(state)][1] and len(R._INDEX) == 1    # built once, reused
+    del state
+    gc.collect()
+    assert not R._INDEX
+    R._STATS.clear()
