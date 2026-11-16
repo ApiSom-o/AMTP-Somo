@@ -21,21 +21,25 @@ import atexit
 import json
 import os
 import sys
+import weakref
 
 from amtp.core import boolean
 from bench import experiments as E
 from bench_split.search_only import SearchIndex, search_fast, search_only
 
 _full_query = E.run_query
-_INDEX = {}          # id(state) -> (state, SearchIndex): one index per snapshot, kept with its snapshot
+_INDEX = {}          # id(state) -> (weak reference to the snapshot, SearchIndex): one index per snapshot, dropped
+#                      with it (the suites free a snapshot after each size; the index must not keep it alive)
 _STATS = []
+_CALLS = [0]
 
 
 def _index_for(state, domain):
-    ent = _INDEX.get(id(state))
-    if ent is None or ent[0] is not state:
+    key = id(state)
+    ent = _INDEX.get(key)
+    if ent is None or ent[0]() is not state:
         idx = SearchIndex(state)
-        _INDEX[id(state)] = (state, idx)
+        _INDEX[key] = (weakref.ref(state, lambda _, k=key: _INDEX.pop(k, None)), idx)
         _STATS.append({"domain": domain, "epoch": state.epoch, "keywords_indexed": idx.keys,
                        "keywords_total": len(state.postings), "build_ms": round(idx.build_ms, 3),
                        "approx_mb": round(idx.approx_bytes / 2 ** 20, 2)})
@@ -59,9 +63,12 @@ def run_query_split(dom, state, user, text):
     t_q, _ = user.make_query(dom.name, text, dom.anchor)       # the same B_Q the full query sends (not timed)
     b_q = boolean.from_json(t_q["B_Q"])
     plain, pf, fast = {}, {}, {}
-    got = [search_only(state, b_q, dom.server.dht, timing=plain),
-           search_only(state, b_q, dom.server.dht, timing=pf, partition_first=True),
-           search_fast(state, idx, b_q, dom.server.dht, timing=fast)]
+    forms = [lambda: search_only(state, b_q, dom.server.dht, timing=plain),
+             lambda: search_only(state, b_q, dom.server.dht, timing=pf, partition_first=True),
+             lambda: search_fast(state, idx, b_q, dom.server.dht, timing=fast)]
+    k = _CALLS[0] % 3                       # rotate which form runs first, so none always pays the cold caches
+    _CALLS[0] += 1
+    got = [f() for f in forms[k:] + forms[:k]]
     times, info = _full_query(dom, state, user, text)
     if any(ids != info["ids"] for ids in got):
         raise SystemExit("CORRECTNESS GATE FAILED: search-only files differ from the full response")
