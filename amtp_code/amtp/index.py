@@ -5,12 +5,13 @@ DomainState is the Cloud Server's read-only query snapshot of one finalized epoc
 transition on its dirty paths; Engine.snapshot() then rebuilds this snapshot in full and the
 server checks that its R_D equals the incremental one.
 """
+import hashlib
 import os
 import re
 from dataclasses import dataclass, field
 
 from .bptree import BPlusTree
-from .core.hashing import H, enc_posting
+from .core.hashing import TAG_POSTING, H, HashCounter, enc_posting
 from .cuckoo import CuckooFilter
 from .core.merkle import MerkleTree, merkle_root
 
@@ -78,6 +79,21 @@ def and_prune_on() -> bool:
     return _AND_PRUNE
 
 
+# AND pruning planner (study, default off): besides the keyword with the fewest partitions, send more
+# keywords in full when that shrinks the focus set enough to lower the proof (amtp/server.py _grow_full).
+# Server choice only; the user's check is the same. AMTP_AND_GREEDY=1 or set_and_plan_greedy(True).
+_AND_GREEDY = os.environ.get("AMTP_AND_GREEDY", "0") == "1"
+
+
+def set_and_plan_greedy(on: bool) -> None:
+    global _AND_GREEDY
+    _AND_GREEDY = bool(on)
+
+
+def and_plan_greedy_on() -> bool:
+    return _AND_GREEDY
+
+
 # Result-only partition check (study, default off): the server opens partition slots and domain-tree leaves
 # only for the returned files; the versions v of the other covered partitions travel as a plain list and are
 # bound by γ = H(PID ‖ v ‖ H(Enc(L))). AMTP_PART_RESULTS=1 or set_part_results(True). The user accepts both
@@ -92,6 +108,36 @@ def set_part_results(on: bool) -> None:
 
 def part_results_on() -> bool:
     return _PART_RESULTS
+
+
+_U64_MAX = (1 << 64) - 1
+_LEN8 = (8).to_bytes(4, "big")
+_LEN32 = (32).to_bytes(4, "big")
+
+
+def gamma_wire(pid: str, v: int, component) -> bytes:
+    """γ of a posting component as it arrives on the wire (cid hex or bytes, slot int): the SAME bytes, the
+    same input checks (ValueError on a bad cid or slot) and the same HashCounter counts as gamma(), without
+    the generic per-part encoding of H. Used in the user's PAPC check (the hot loop); falls back to gamma()
+    for γ without v or a non-string PID."""
+    if not _GAMMA_V or type(pid) is not str or type(v) is not int or v < 0 or v > _U64_MAX:
+        return gamma(pid, v, component)
+    parts = [TAG_POSTING, len(component).to_bytes(8, "big")]
+    for cid, slot in component:
+        b = bytes.fromhex(cid) if isinstance(cid, str) else cid
+        if not isinstance(b, bytes) or len(b) != 32:
+            raise ValueError("cid must be 32 bytes")
+        if type(slot) is not int or slot < 0:
+            raise ValueError(f"expected a non-negative integer, got {slot!r}")
+        parts.append(b)
+        parts.append(slot.to_bytes(8, "big"))
+    enc = b"".join(parts)
+    inner = hashlib.sha256(len(enc).to_bytes(4, "big") + enc).digest()       # H(Enc(L))
+    p = pid.encode("utf-8")
+    g = hashlib.sha256(len(p).to_bytes(4, "big") + p + _LEN8 + v.to_bytes(8, "big") + _LEN32 + inner).digest()
+    HashCounter.calls += 2
+    HashCounter.bytes += (4 + len(enc)) + (4 + len(p) + 4 + 8 + 4 + 32)
+    return g
 
 
 def gamma_inner(pid: str, v: int, inner: bytes) -> bytes:

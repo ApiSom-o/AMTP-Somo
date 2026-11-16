@@ -9,7 +9,7 @@ from .core import boolean
 from .core.crypto import aes_gcm_decrypt, hmac_tag, unpack_ct, unwrap, InvalidTag
 from .dht import ciphertext_id
 from .core.hashing import H, enc_bq, lp, u64
-from .index import domain_root, gamma, gamma_inner, imt_leaf, rho
+from .index import domain_root, gamma_inner, gamma_wire, imt_leaf, rho
 from .core.merkle import merkle_root, multiverify
 from .owner import keyword_key
 from .server import query_digest
@@ -233,7 +233,7 @@ class DataUser:
                 for pid, comp in e["L"]:
                     if pid not in vers:
                         raise Reject("papc", f"no version supplied for partition {pid}")
-                    gammas.append(gamma(pid, vers[pid], comp))
+                    gammas.append(gamma_wire(pid, vers[pid], comp))
                 leaf = imt_leaf(hb, rho(hb, len(e["L"]), merkle_root(gammas)), bytes.fromhex(e["next"]))
             if not multiverify(r_idx, e["n"], {e["pos"]: leaf},
                                [bytes.fromhex(x) for x in e["proof"]]):
@@ -259,7 +259,7 @@ class DataUser:
         for j, pid, comp in e["segs"]:
             if pid not in vers:
                 raise Reject("papc", f"no version supplied for partition {pid}")
-            leaves[j], label[j] = gamma(pid, vers[pid], comp), pid
+            leaves[j], label[j] = gamma_wire(pid, vers[pid], comp), pid
             seg_pids.add(pid)
         for j, pid, v, inner in e["nb"]:
             if j in leaves:

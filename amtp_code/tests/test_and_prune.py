@@ -104,12 +104,18 @@ def test_tie_break_does_not_depend_on_keyword_order():
     postings = {a: [("p2", [(b"x", 0)]), ("p5", [(b"y", 1)])],
                 b: [("p1", [(b"z", 0)]), ("p7", [(b"w", 2)])],
                 c: [(f"p{i}", [(b"v", i)]) for i in range(9)]}
+    from amtp.index import and_plan_greedy_on, set_and_plan_greedy
     state = Counts(postings)
     picks = set()
-    for order in ([a, b, c], [b, a, c], [c, b, a]):
-        ast = ("AND", [("leaf", h) for h in order])
-        pruned, focus = _and_plan(state, ast, postings)
-        picks.add((frozenset(pruned), frozenset(focus)))
+    old = and_plan_greedy_on()
+    set_and_plan_greedy(False)                  # the basic plan: one full keyword (the planner is tested below)
+    try:
+        for order in ([a, b, c], [b, a, c], [c, b, a]):
+            ast = ("AND", [("leaf", h) for h in order])
+            pruned, focus = _and_plan(state, ast, postings)
+            picks.add((frozenset(pruned), frozenset(focus)))
+    finally:
+        set_and_plan_greedy(old)
     assert len(picks) == 1
     assert picks == {(frozenset({a, c}), frozenset({"p1", "p7"}))}      # smallest PID list wins the tie
 
@@ -261,3 +267,54 @@ def test_random_changes_are_rejected_or_harmless(prune, rich, seed):
             rep = user.verify(ctx, resp)                     # must not raise
             if rep["accepted"]:
                 assert _result(resp) == truth, (text, rep)
+
+
+def test_greedy_planner_sends_a_second_list_when_it_pays_off():
+    """Two keywords each in 16 of 64 partitions, overlapping in one, and two keywords in every partition: sending
+    the second rare keyword in full shrinks F from 16 partitions to 1 for the two frequent keywords."""
+    from amtp.index import and_plan_greedy_on, set_and_plan_greedy
+    from amtp.server import _and_plan
+
+    class Counts:
+        def __init__(self, postings):
+            self.n = {bytes.fromhex(h): sum(len(c) for _, c in p) for h, p in postings.items() if p}
+
+        def post_count(self, hb):
+            return self.n[hb]
+
+    def comp(n):
+        return [(bytes([i]) * 32, i) for i in range(n)]
+
+    a, b, c, d = "aa" * 32, "bb" * 32, "cc" * 32, "dd" * 32
+    pid = [f"p{i:02d}" for i in range(64)]
+    postings = {a: [(pid[i], comp(1)) for i in range(16)],
+                b: [(pid[i], comp(1)) for i in range(15, 31)],
+                c: [(p, comp(40)) for p in pid],
+                d: [(p, comp(40)) for p in pid]}
+    ast = ("AND", [("leaf", h) for h in (a, b, c, d)])
+    old = and_plan_greedy_on()
+    try:
+        set_and_plan_greedy(False)
+        pruned, focus = _and_plan(Counts(postings), ast, postings)
+        assert pruned == {b, c, d} and focus == {pid[i] for i in range(16)}
+        set_and_plan_greedy(True)
+        pruned, focus = _and_plan(Counts(postings), ast, postings)
+        assert pruned == {c, d} and focus == {pid[15]}
+    finally:
+        set_and_plan_greedy(old)
+
+
+@pytest.mark.parametrize("text", QUERIES)
+def test_greedy_planner_answers_are_accepted_and_exact(prune, rich, text):
+    from amtp.index import and_plan_greedy_on, set_and_plan_greedy
+    w, words = rich
+    user = w.users["mali"]
+    old = and_plan_greedy_on()
+    set_and_plan_greedy(True)
+    try:
+        ctx, resp = _ask(w, user, text)
+        rep = user.verify(ctx, resp)
+        assert rep["accepted"], (text, rep["failed"], rep["checks"])
+        assert {o["doc"] for o in user.decrypt(resp) if o["doc"].startswith("S-")} == _truth(words, text)
+    finally:
+        set_and_plan_greedy(old)

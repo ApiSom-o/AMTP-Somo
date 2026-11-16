@@ -4,6 +4,7 @@ There is no attack code here. The demo and the tests load the adversary plug-in
 (amtp/adversary.py), which wraps this server; the benchmarks never do.
 """
 import bisect
+import math
 import time
 
 from .core import boolean
@@ -12,7 +13,7 @@ from .dht import DHT, StorageError
 from .engine import Engine
 from .update import delta, enc_aff, request_digest
 from .core.hashing import H, TAG_QUERY, enc_bq
-from .index import SENTINEL_LO, and_prune_on, part_results_on
+from .index import SENTINEL_LO, and_plan_greedy_on, and_prune_on, part_results_on
 
 def query_digest(domain, b_q, epoch, t, nonce_hex) -> bytes:
     """H(tag ‖ i ‖ Enc(B_Q) ‖ e* ‖ t ‖ η): the message under τ_Q, all fields binary."""
@@ -337,10 +338,66 @@ def _and_plan(state, b_q, postings):
 
     _, full = plan(b_q)
     full |= {h for h, p in postings.items() if p is None}          # absent keys: proven empty
+    if and_plan_greedy_on():
+        full = _grow_full(b_q, postings, sel, size, full, data_key)
     pruned = {h for h in postings if h not in full}
     if not pruned:
         return set(), None
     return pruned, boolean.focus(b_q, {h: sel[h] for h in full})
+
+
+def _focus_cost(n_sel: int, opened_segs: int, seg_postings: int, missing: int) -> int:
+    """Estimated wire size of one keyword's focus evidence (as _focus_bytes counts it): its components in F,
+    about two neighbour leaves per partition of F it lacks (at most n_sel), and the R^post multiproof."""
+    nb = min(2 * missing, n_sel)
+    opened = max(1, opened_segs + nb)
+    size = 1 << max(0, (n_sel - 1).bit_length())
+    siblings = int(opened * max(0.0, math.log2(size / opened))) if opened < size else 0
+    return (3 * _INT + _HASH + opened_segs * 3 * _INT + seg_postings * (_HASH + _INT)
+            + _INT + nb * (3 * _INT + _HASH) + _INT + siblings * _HASH)
+
+
+_GREEDY_MIN_FOCUS = 8     # the planner runs only when F has more partitions than this
+
+
+def _grow_full(b_q, postings, sel, size, full, data_key):
+    """Greedy: send one more keyword in full while that lowers the estimated proof. A keyword sent in full
+    costs its whole list but shrinks F (boolean.focus is an intersection under AND), so every other partial
+    keyword opens fewer components. Each candidate is scored with set operations only; the other keywords'
+    focus cost is scaled by |F'| / |F| (independence estimate). The user's check is unchanged: it already
+    accepts any set of full keywords that bounds F."""
+    present = [h for h, p in postings.items() if p is not None]
+
+    def partial_cost(h, F):
+        s = sel[h]
+        k = len(F & s)                    # components of h inside F; their postings ≈ k x average component size
+        return min(_focus_cost(len(s), k, round(k * size[h] / len(s)), len(F) - k),
+                   _full_bytes(len(s), size[h]))
+
+    full = set(full)
+    F = boolean.focus(b_q, {h: sel[h] for h in full})
+    if F is None or len(F) <= _GREEDY_MIN_FOCUS:   # already small: another full list cannot pay for itself
+        return full
+    while F:
+        partial = [h for h in present if h not in full]
+        if not partial:
+            break
+        costs = {h: partial_cost(h, F) for h in partial}
+        best, best_gain = None, 0
+        for c in sorted(partial, key=lambda h: (len(sel[h]), size[h], data_key((sel[h], {h})))):
+            F2 = boolean.focus(b_q, {h: sel[h] for h in full | {c}})
+            if F2 is None:
+                continue
+            shrink = len(F2) / len(F)
+            gain = (sum(costs[h] for h in partial if h != c) * (1 - shrink)
+                    - (_full_bytes(len(sel[c]), size[c]) - costs[c]))
+            if gain > best_gain:
+                best, best_gain = c, gain
+        if best is None:
+            break
+        full.add(best)
+        F = boolean.focus(b_q, {h: sel[h] for h in full})
+    return full
 
 
 def _focus_evidence(state, hb: bytes, posting, focus_set):

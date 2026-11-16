@@ -66,7 +66,7 @@ from amtp.anchor import RootAnchor, transition_message           # noqa: E402
 from amtp.core.crypto import AttributeAuthority, Signer, make_ct          # noqa: E402
 from amtp.dht import ciphertext_id                               # noqa: E402
 from amtp.engine import Engine
-from amtp.index import set_and_prune, set_gamma_v, set_part_results  # noqa: E402
+from amtp.index import set_and_plan_greedy, set_and_prune, set_gamma_v, set_part_results  # noqa: E402
 from amtp.core.hashing import HashCounter, enc                   # noqa: E402
 from amtp.core.crypto import keyword_cipher                      # noqa: E402
 from amtp.nlp import norm                                         # noqa: E402
@@ -979,6 +979,9 @@ def main():
     ap.add_argument("--and-prune", action="store_true",
                     help="AND pruning: full list of one keyword, other keywords only in its partitions "
                          "(study; same as AMTP_AND_PRUNE=1; default off = the paper's ASPA)")
+    ap.add_argument("--and-greedy", action="store_true",
+                    help="AND pruning planner: send more keywords in full when that lowers the proof "
+                         "(study; same as AMTP_AND_GREEDY=1; needs --and-prune)")
     ap.add_argument("--part-results", action="store_true",
                     help="result-only partition check: open partition slots only for the returned files "
                          "(study; same as AMTP_PART_RESULTS=1; default off = the paper's ASPA)")
@@ -990,6 +993,9 @@ def main():
     if a.and_prune or os.environ.get("AMTP_AND_PRUNE", "0") == "1":
         os.environ["AMTP_AND_PRUNE"] = "1"                # recorded in every manifest
         set_and_prune(True)
+    if a.and_greedy or os.environ.get("AMTP_AND_GREEDY", "0") == "1":
+        os.environ["AMTP_AND_GREEDY"] = "1"               # recorded in every manifest
+        set_and_plan_greedy(True)
     if a.part_results or os.environ.get("AMTP_PART_RESULTS", "0") == "1":
         os.environ["AMTP_PART_RESULTS"] = "1"             # recorded in every manifest
         set_part_results(True)
