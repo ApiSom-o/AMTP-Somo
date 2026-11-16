@@ -309,7 +309,9 @@ class Client:
             res.update(verdict="VERIFIED", failed=None, reason="all seven checks passed", result_count=len(items),
                        results=[{"doc": i.get("doc"), "status": i["status"], "title": i.get("title", ""),
                                  "snippet": i.get("body", "")[:240], "pid": i["pid"], "loc": i["loc"]}
-                                for i in items[:40]])
+                                for i in items[:40]],
+                       files=[{"doc": i.get("doc"), "title": i.get("title", ""), "status": i["status"],
+                               "pid": i["pid"], "loc": i["loc"], "cid": i["cid"][:16]} for i in items])
             self.last[domain] = (ctx, resp)
         else:
             label = next(c["label"] for c in rep["checks"] if c["key"] == failed)
