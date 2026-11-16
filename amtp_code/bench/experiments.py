@@ -955,9 +955,9 @@ def main():
     ap.add_argument("--buckets", type=int, default=16, help="placement groups (arXiv primary categories)")
     ap.add_argument("--theta-max", type=int, default=64)                 # docs/THETA_CHOICE.md
     ap.add_argument("--theta-min", type=int, default=16)
-    ap.add_argument("--placement", choices=PLACEMENTS, default=os.environ.get("AMTP_PLACEMENT", "least"),
+    ap.add_argument("--placement", choices=PLACEMENTS, default=os.environ.get("AMTP_PLACEMENT", "fill"),
                     help="where a new file goes (amtp/variants.py): least = least occupied partition of its bucket, "
-                         "fill = fullest partition below θ_max (the same rule in every suite); default from AMTP_PLACEMENT")
+                         "fill = fullest partition below θ_max (the same rule in every suite); default fill (the paper's rule) or AMTP_PLACEMENT")
     ap.add_argument("--theta-values", type=int, nargs="+", default=[64, 128, 256, 512, 1024],
                     help="θ_max values for the theta sweep (θ_min = θ_max / 4)")
     D = arxiv_loader()

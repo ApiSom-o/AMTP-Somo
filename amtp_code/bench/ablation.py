@@ -108,9 +108,9 @@ def main():
     ap.add_argument("--buckets", type=int, default=16, help="workload groups (e.g. mailbox owners)")
     ap.add_argument("--theta-max", type=int, default=256)
     ap.add_argument("--theta-min", type=int, default=64)
-    ap.add_argument("--placement", choices=PLACEMENTS, default=os.environ.get("AMTP_PLACEMENT", "least"),
+    ap.add_argument("--placement", choices=PLACEMENTS, default=os.environ.get("AMTP_PLACEMENT", "fill"),
                     help="where a new file goes (amtp/variants.py): least = least occupied partition of its bucket, "
-                         "fill = fullest partition below θ_max (same rule for AMTP and Static-MT); default from AMTP_PLACEMENT")
+                         "fill = fullest partition below θ_max (same rule for AMTP and Static-MT); default fill (the paper's rule) or AMTP_PLACEMENT")
     ap.add_argument("--batches", type=int, default=20)
     ap.add_argument("--batch-size", type=int, default=100)
     ap.add_argument("--skews", default="0,0.5,0.8,0.95",

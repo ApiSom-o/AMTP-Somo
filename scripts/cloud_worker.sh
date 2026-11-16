@@ -11,7 +11,7 @@
 #   paper_v     AMTP's γ with the version v (the paper): every experiment, every scheme
 #   paper_nov   AMTP's γ without v (study B4, AMTP_GAMMA_V=0): only the AMTP update experiments
 # Every machine must be on the same commit. Results: baselines/results/runs/<run>/ (logs in <run>/logs/).
-# Placement rule of AMTP / Static-MT (amtp/variants.py): AMTP_PLACEMENT=fill|least (default least), read by
+# Placement rule of AMTP / Static-MT (amtp/variants.py): AMTP_PLACEMENT=fill|least (default fill, the paper's rule), read by
 # bench.experiments and bench.ablation and recorded in every manifest, e.g.
 #   AMTP_PLACEMENT=fill RUN_NAME=paper_fill bash scripts/cloud_worker.sh 3
 set -u
@@ -47,6 +47,9 @@ job_env() {
       echo "AMTP_PLACEMENT=fill SM_RUNS=1 SM_THETAS=${1#fill-sm} SM_VARIANTS=AMTP,Static-MT|splitmerge" ;;
     fill-gmtv)       echo 'AMTP_PLACEMENT=fill SM_RUNS=1 SM_THETAS=64 SM_VARIANTS="Global-MT(v)" SM_TAG=_gmtv|splitmerge' ;;
     fill-amtp)       echo 'AMTP_PLACEMENT=fill SCHEMES=amtp|search1 verify1 tamper xsearch xverify xdomains update exp5' ;;
+    # plan "prune" (16 Nov): AMTP query suites with every query flag on (AND pruning, result-only partition check,
+    # greedy planner), placement fill; update code is unchanged since "fill", so ex3 / ex4 and the baselines are not re-run
+    prune-amtp)      echo 'AMTP_PLACEMENT=fill AMTP_AND_PRUNE=1 AMTP_PART_RESULTS=1 AMTP_AND_GREEDY=1 SCHEMES=amtp|search1 verify1 tamper xsearch xverify xdomains exp5' ;;
     *) return 1 ;;
   esac
 }
@@ -54,7 +57,12 @@ job_env() {
 # worker -> jobs (estimated from the smoke run, REPS = 15; re-balance after the calibration run).
 # The six split / merge jobs (not shortened by REPS) go to six different machines.
 # PLAN=fill: the 5-machine re-run of AMTP (15 Nov), e.g.  PLAN=fill RUN_NAME=paper_fill bash scripts/cloud_worker.sh 1
+# PLAN=prune: 1 machine, AMTP query suites with every query flag on, e.g.  PLAN=prune RUN_NAME=paper_prune bash scripts/cloud_worker.sh 1
 plan() {
+  if [ "${PLAN:-}" = prune ]; then
+    case $1 in 1) echo "prune-amtp" ;; *) return 1 ;; esac
+    return 0
+  fi
   if [ "${PLAN:-}" = fill ]; then
     case $1 in
       1) echo "fill-sm64" ;;
