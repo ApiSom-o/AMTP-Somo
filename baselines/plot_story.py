@@ -406,13 +406,27 @@ def update_vs_domains(run, out, points):
 
 
 # 9 and 10. split/merge over the update stream (θ_max = 64)
-SM_VARIANTS = ("AMTP", "Static-MT")                           # Global-MT here is unversioned: not comparable
+# Global-MT (unversioned) is not comparable; Global-MT(v) is drawn when its rows exist, either in the θ = 64
+# folder or in a separate splitmerge_*_t64_<tag> folder (a run on another machine with the same seed)
+SM_ALL = ("AMTP", "Static-MT", "Global-MT(v)")
 
 
 def sm_rows(run, name):
-    d = glob.glob(os.path.join(run, "amtp", "splitmerge_*_t64"))
-    with open(os.path.join(d[0], name)) as f:
-        return list(csv.DictReader(f))
+    d = sorted(glob.glob(os.path.join(run, "amtp", "splitmerge_*_t64")) +
+               glob.glob(os.path.join(run, "amtp", "splitmerge_*_t64_*")))
+    out = []
+    for folder in d:
+        with open(os.path.join(folder, name)) as f:
+            out += list(csv.DictReader(f))
+    return out
+
+
+def sm_variants(rs):
+    return tuple(v for v in SM_ALL if any(x["variant"] == v for x in rs))
+
+
+SM_SETUP = ("100,000 files · then 100,000 more, 95% of them into one hot group, then 65% of that group deleted · "
+            "b = 100 files per batch · Static-MT = AMTP's starting layout with the same placement rule, never split")
 
 
 def sm_axes(ax, rs, run):
@@ -425,7 +439,8 @@ def sm_axes(ax, rs, run):
 
 
 def max_partition(run, out, points):
-    rs = [x for x in sm_rows(run, "layout.csv") if x["variant"] in SM_VARIANTS and x["run"] == "0"]
+    rs = [x for x in sm_rows(run, "layout.csv") if x["variant"] in SM_ALL and x["run"] == "0"]
+    SM_VARIANTS = sm_variants(rs)
     fig, ax = new_fig(6.6, 5.0)
     data = {}
     for v in SM_VARIANTS:
@@ -434,20 +449,22 @@ def max_partition(run, out, points):
     lines(ax, data, {v: EXP4_STYLE[v] for v in SM_VARIANTS}, points, "max_partition_vs_batch",
           lambda y: f"{y:,.0f}")
     ax.axhline(64, color=AXIS, linewidth=1)
-    ax.text(300, 64 + 12, r"$\theta_{\max}$ = 64", va="bottom", fontsize=9, color=INK2)
-    ax.set_ylim(0, max(max(y) for _, y in data.values()) * 1.18)
-    labels(ax, "Update batch", "Largest partition (posting components)")
-    ax.legend(frameon=False, fontsize=9.5, loc="upper left", bbox_to_anchor=(0, 0.93))
+    ax.set_yscale("log")                                      # 64 next to ~100,000: a linear axis hides AMTP
+    ax.text(300, 64 * 1.15, r"$\theta_{\max}$ = 64", va="bottom", fontsize=9, color=INK2)
+    ax.set_ylim(20, max(max(y) for _, y in data.values()) * 6)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
+    labels(ax, "Update batch", "Largest partition (files, log scale)")
+    ax.legend(frameon=False, fontsize=9.5, loc="center left")         # the empty band between 64 and ~10,000
     sm_axes(ax, rs, run)
     peak = max(data["Static-MT"][1])
     save(fig, ax, out, "max_partition_vs_batch",
          f"AMTP keeps every partition within $\\theta_{{\\max}}$ = 64; Static-MT's largest grows to {peak:,.0f}",
-         "100,000 files · Zipf-skewed keywords (s = 0.95) · b = 100 files per batch · "
-         "Static-MT = AMTP's initial layout, frozen")
+         SM_SETUP + (" · Global-MT(v) = one partition" if "Global-MT(v)" in SM_VARIANTS else ""))
 
 
 def update_vs_batch(run, out, points, window=50):
-    rs = [x for x in sm_rows(run, "updates.csv") if x["variant"] in SM_VARIANTS and x["run"] == "0"]
+    rs = [x for x in sm_rows(run, "updates.csv") if x["variant"] in SM_ALL and x["run"] == "0"]
+    SM_VARIANTS = sm_variants(rs)
     fig, ax = new_fig(6.6, 5.0)
     data = {}
     for v in SM_VARIANTS:
@@ -460,19 +477,22 @@ def update_vs_batch(run, out, points, window=50):
     for (_, line) in zip(SM_VARIANTS, ax.get_lines()):
         line.set_markersize(0)
     ax.set_yscale("log")
-    ax.yaxis.set_major_locator(FixedLocator([2, 3, 5, 10, 20, 40]))
+    ax.yaxis.set_major_locator(FixedLocator([0.5, 1, 2, 5, 10, 20, 50]))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
     ax.yaxis.set_minor_formatter(FuncFormatter(lambda v, _: ""))
     labels(ax, "Update batch", "Update time per batch (s)")
-    ax.legend(frameon=False, fontsize=9.5, loc="upper left", bbox_to_anchor=(0, 0.93))
+    ax.legend(frameon=False, fontsize=9.5, loc="lower right", bbox_to_anchor=(1, 0.02))   # below AMTP's delete phase
     ax.set_ylim(ax.get_ylim()[0], ax.get_ylim()[1] * 1.6)
     sm_axes(ax, rs, run)
     allm = {v: med([float(x["update_ms"]) for x in rs if x["variant"] == v]) for v in SM_VARIANTS}
-    save(fig, ax, out, "update_vs_batch",
-         f"By splitting hot partitions, AMTP updates {allm['Static-MT'] / allm['AMTP']:.1f}× faster than "
-         f"Static-MT over the whole stream",
-         f"100,000 files · Zipf s = 0.95 · b = 100 · θ_max = 64 · γ with v · each point = median of {window} "
-         f"batches · ratio = medians over all {len(rs) // len(SM_VARIANTS):,} batches")
+    nb = len([x for x in rs if x["variant"] == "AMTP"])
+    title = (f"By splitting hot partitions, AMTP updates {allm['Static-MT'] / allm['AMTP']:.1f}× faster than "
+             f"Static-MT over the whole stream")
+    if "Global-MT(v)" in allm:
+        title += f" and {allm['Global-MT(v)'] / allm['AMTP']:.1f}× faster than one partition (Global-MT(v))"
+    save(fig, ax, out, "update_vs_batch", title,
+         f"{SM_SETUP} · θ_max = 64 · γ with v · each point = median of {window} batches · "
+         f"ratio = medians over all {nb:,} batches")
 
 # ---------------------------------------------------------------- attack detection as lines
 def detection_vs_tampered(run, out, points):

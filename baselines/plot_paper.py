@@ -46,7 +46,7 @@ SHAPES = {"AND": "A ∧ B ∧ …", "OR": "A ∨ B ∨ …", "AND_of_OR": "(A �
           "OR_of_AND": "(A ∧ B) ∨ (C ∧ D) …"}
 KINDS = {"modify": "modified files", "hide": "hidden files", "inject": "injected files",
          "old_version": "old versions of files"}
-VARIANTS = ["AMTP", "Static-MT", "Global-MT"]
+VARIANTS = ["AMTP", "Static-MT", "Global-MT", "Global-MT(v)"]   # a variant without rows is skipped
 SEARCH_Y = [("server_total", "server", "Server time: search + proof (ms)"),
             ("end_to_end", "end_to_end", "End-to-end search time (ms)")]
 POINTS = []
@@ -299,18 +299,25 @@ def read_csv(path):
 
 
 def splitmerge(run, out):
-    folders = sorted(glob.glob(os.path.join(run, "amtp", "splitmerge_*")))
-    per_theta = {}
-    for d in folders:
+    # several folders may hold the same θ (e.g. splitmerge_n100000_t64 and splitmerge_n100000_t64_gmtv, a variant
+    # run on another machine with the same seed): their rows are drawn together
+    groups = {}
+    for d in sorted(glob.glob(os.path.join(run, "amtp", "splitmerge_*"))):
         man = {}
         if os.path.exists(os.path.join(d, "manifest.json")):
             with open(os.path.join(d, "manifest.json"), encoding="utf-8") as f:
                 man = json.load(f)
         args = man.get("args", man)
-        theta = int(args.get("theta_max") or os.path.basename(d).rsplit("_t", 1)[-1])
-        upd, lay, qry = (read_csv(os.path.join(d, n)) for n in ("updates.csv", "layout.csv", "queries.csv"))
-        if not upd:
+        theta = int(args.get("theta_max") or os.path.basename(d).split("_t", 1)[-1].split("_")[0])
+        rows = [read_csv(os.path.join(d, n)) for n in ("updates.csv", "layout.csv", "queries.csv")]
+        if not rows[0]:
             continue
+        g = groups.setdefault(theta, {"args": args, "rows": [[], [], []]})
+        for acc, r in zip(g["rows"], rows):
+            acc += r
+    per_theta = {}
+    for theta, g in sorted(groups.items()):
+        args, (upd, lay, qry) = g["args"], g["rows"]
         per_theta[theta] = (upd, qry)
         fixed = (f"θ_max = {theta}, θ_min = {args.get('theta_min', theta // 4)} · start "
                  f"{fmt_int(args['n']) if 'n' in args else '?'} files · b = {args.get('batch_size', '?')} · "
